@@ -1,30 +1,35 @@
 const steps = [
   {
-    title: 'Define flows',
-    description: 'Compose proposal and automation blocks with clear risk checks and execution conditions.',
+    num: '01',
+    title: 'Describe your workflow.',
+    body: 'Set the conditions, timing windows, and execution logic for your governance action. No scripting, no custom infrastructure.',
   },
   {
-    title: 'Publish with confidence',
-    description: 'Compile to instructions, validate support, and publish proposals with optional onchain creation.',
+    num: '02',
+    title: 'Publish on-chain.',
+    body: 'Daometer compiles your workflow into structured proposal instructions and submits them directly to Realms.',
   },
   {
-    title: 'Automate execution',
-    description: 'Worker and workflow engine handle timing windows, notifications, retries, and manual gates.',
+    num: '03',
+    title: 'Let the engine run.',
+    body: 'From quorum detection to post-vote execution, every state transition is handled automatically — with retries, holds, and a full audit trail.',
   },
 ];
 
 export const HowItWorksSection = (): JSX.Element => (
   <section id="how-it-works" className="landing-section">
-    <p className="section-kicker">How it works</p>
-    <h2>From flow design to execution, connected.</h2>
+    <div className="hiw-header">
+      <p className="section-kicker">How it works</p>
+      <h2>Three steps. Zero babysitting.</h2>
+    </div>
 
-    <div className="step-grid">
-      {steps.map((step, index) => (
-        <article key={step.title} className="step-card">
-          <p className="step-index">0{index + 1}</p>
-          <h3>{step.title}</h3>
-          <p>{step.description}</p>
-        </article>
+    <div className="hiw-steps">
+      {steps.map((step) => (
+        <div key={step.num} className="hiw-step">
+          <span className="hiw-num">{step.num}</span>
+          <h3 className="hiw-title">{step.title}</h3>
+          <p className="hiw-body">{step.body}</p>
+        </div>
       ))}
     </div>
   </section>

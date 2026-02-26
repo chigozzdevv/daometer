@@ -493,57 +493,67 @@ p {
   background: rgba(125, 245, 165, 0.12);
 }
 
-/* ─── Step Grid (How it works) ───────────────────────────────── */
 
-.step-grid {
+.hiw-header {
+  margin-bottom: 1.6rem;
+}
+
+.hiw-header h2 {
+  margin-bottom: 0;
+}
+
+.hiw-steps {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
   gap: 0;
   border: var(--border);
 }
 
-.step-card {
-  padding: 1.4rem;
-  border-right: var(--border);
-  background: var(--bg);
+.hiw-step {
   display: grid;
-  gap: 0.5rem;
-  align-content: start;
+  grid-template-columns: 64px 1fr 2fr;
+  align-items: stretch;
+  gap: 0;
+  border-bottom: var(--border);
+  background: var(--white);
+  transition: background 0.12s;
 }
 
-.step-card:last-child {
-  border-right: none;
+.hiw-step:last-child {
+  border-bottom: none;
 }
 
-.step-card:nth-child(1) {
-  border-top: 4px solid var(--yellow);
+.hiw-step:hover {
+  background: var(--bg);
 }
 
-.step-card:nth-child(2) {
-  border-top: 4px solid var(--pink);
-}
-
-.step-card:nth-child(3) {
-  border-top: 4px solid var(--green);
-}
-
-.step-index {
-  font-size: 0.75rem;
+.hiw-num {
+  font-size: 0.7rem;
   font-weight: 800;
-  letter-spacing: 0.1em;
-  color: #888;
+  letter-spacing: 0.12em;
+  color: #aaa;
+  padding: 1.3rem 1rem 1.3rem 1.2rem;
+  border-right: var(--border);
+  align-self: stretch;
+  display: flex;
+  align-items: center;
 }
 
-.step-card h3 {
+.hiw-title {
   font-size: 1rem;
   font-weight: 800;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+  padding: 1.3rem 1.2rem;
+  border-right: var(--border);
+  display: flex;
+  align-items: center;
 }
 
-.step-card p {
+.hiw-body {
   font-size: 0.88rem;
   color: #555;
-  line-height: 1.6;
+  line-height: 1.65;
+  padding: 1.3rem 1.4rem;
 }
 
 
@@ -615,8 +625,6 @@ p {
   line-height: 1.2;
 }
 
-/* ─── Footer ─────────────────────────────────────────────────── */
-
 .minimal-footer {
   padding: 1.2rem 0;
   border-top: var(--border);
@@ -631,7 +639,35 @@ p {
 
 .auth-page {
   width: min(480px, calc(100% - 2rem));
-  margin: 4rem auto;
+  margin: 3rem auto;
+}
+
+.auth-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.4rem;
+}
+
+.auth-back {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #666;
+  border: var(--border);
+  padding: 0.4rem 0.8rem;
+  transition: background 0.1s, color 0.1s;
+}
+
+.auth-back:hover {
+  background: var(--black);
+  color: var(--white);
+}
+
+.auth-logo {
+  font-weight: 800;
+  font-size: 1.2rem;
+  letter-spacing: -0.03em;
+  color: var(--black);
 }
 
 .auth-card {
@@ -904,17 +940,19 @@ p {
     border-bottom: none;
   }
 
-  .step-grid {
-    grid-template-columns: 1fr;
+  .hiw-step {
+    grid-template-columns: 48px 1fr;
   }
 
-  .step-card {
+  .hiw-title {
+    grid-column: 2;
     border-right: none;
-    border-bottom: var(--border);
+    border-bottom: 1px solid #eaeaea;
   }
 
-  .step-card:last-child {
-    border-bottom: none;
+  .hiw-body {
+    grid-column: 1 / -1;
+    padding: 0.8rem 1.2rem 1.2rem;
   }
 
   .cta-section {
