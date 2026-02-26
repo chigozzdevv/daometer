@@ -1,7 +1,7 @@
-import { DashboardPageShell } from '@/features/dashboard/components/dashboard-page-shell';
+import { DashboardShell } from '@/features/dashboard/components/shell';
 
 export const DashboardNotificationsPage = (): JSX.Element => (
-  <DashboardPageShell title="Notifications" description="Keep operators and delegates informed by state and timing.">
+  <DashboardShell title="Notifications" description="Keep operators and delegates informed by state and timing.">
     <div className="simple-list">
       <article>
         <h3>Voting ends in 5h</h3>
@@ -12,5 +12,5 @@ export const DashboardNotificationsPage = (): JSX.Element => (
         <p>Execution paused pending review for high-risk proposal.</p>
       </article>
     </div>
-  </DashboardPageShell>
+  </DashboardShell>
 );

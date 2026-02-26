@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { AuthCard } from '@/features/auth/components/auth-card';
+import { AuthCard } from '@/features/auth/components/card';
 
 type AuthMode = 'login' | 'register';
 

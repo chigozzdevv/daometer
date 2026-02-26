@@ -1,5 +1,5 @@
 import { type FormEvent, useMemo, useState } from 'react';
-import { loginRequest, registerRequest } from '@/features/auth/api/auth-api';
+import { loginRequest, registerRequest } from '@/features/auth/api/api';
 import { useAuth } from '@/app/providers/auth-provider';
 
 type AuthMode = 'login' | 'register';

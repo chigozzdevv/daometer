@@ -3,7 +3,7 @@ export type DashboardNavItem = {
   href: string;
 };
 
-export const dashboardNavItems: DashboardNavItem[] = [
+export const navItems: DashboardNavItem[] = [
   { label: 'Overview', href: '/dashboard' },
   { label: 'Flows', href: '/dashboard/flows' },
   { label: 'Notifications', href: '/dashboard/notifications' },

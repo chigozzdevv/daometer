@@ -1,7 +1,7 @@
-import { DashboardPageShell } from '@/features/dashboard/components/dashboard-page-shell';
+import { DashboardShell } from '@/features/dashboard/components/shell';
 
 export const DashboardSettingsPage = (): JSX.Element => (
-  <DashboardPageShell title="Settings" description="Configure environment behavior and automation defaults.">
+  <DashboardShell title="Settings" description="Configure environment behavior and automation defaults.">
     <div className="simple-list">
       <article>
         <h3>Risk limits</h3>
@@ -12,5 +12,5 @@ export const DashboardSettingsPage = (): JSX.Element => (
         <p>Adjust retry delay, max attempts, and polling interval guidance.</p>
       </article>
     </div>
-  </DashboardPageShell>
+  </DashboardShell>
 );

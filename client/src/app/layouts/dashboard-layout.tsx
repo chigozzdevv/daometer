@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { dashboardNavItems } from '@/app/constants/dashboard-nav-items';
+import { navItems } from '@/app/constants/nav-items';
 import { useAuth } from '@/app/providers/auth-provider';
 
 const navLinkClassName = ({ isActive }: { isActive: boolean }): string =>
@@ -19,7 +19,7 @@ export const DashboardLayout = (): JSX.Element => {
       <aside className="dashboard-sidebar">
         <p className="dashboard-brand">Daometer</p>
         <nav className="dashboard-sidebar-nav">
-          {dashboardNavItems.map((item) => (
+          {navItems.map((item) => (
             <NavLink key={item.href} to={item.href} end={item.href === '/dashboard'} className={navLinkClassName}>
               {item.label}
             </NavLink>

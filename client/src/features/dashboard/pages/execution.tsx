@@ -1,7 +1,7 @@
-import { DashboardPageShell } from '@/features/dashboard/components/dashboard-page-shell';
+import { DashboardShell } from '@/features/dashboard/components/shell';
 
-export const DashboardExecutionsPage = (): JSX.Element => (
-  <DashboardPageShell title="Executions" description="Inspect queue state, retries, and completed actions.">
+export const DashboardExecutionPage = (): JSX.Element => (
+  <DashboardShell title="Executions" description="Inspect queue state, retries, and completed actions.">
     <div className="simple-list">
       <article>
         <h3>Job #a13 - processing</h3>
@@ -12,5 +12,5 @@ export const DashboardExecutionsPage = (): JSX.Element => (
         <p>Retry scheduled in 10 minutes due to temporary RPC error.</p>
       </article>
     </div>
-  </DashboardPageShell>
+  </DashboardShell>
 );

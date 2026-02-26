@@ -1,13 +1,13 @@
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/app/providers/auth-provider';
-import { ActionCardsSection } from '@/features/landing/sections/action-cards-section';
-import { AboutSection } from '@/features/landing/sections/about-section';
-import { CtaSection } from '@/features/landing/sections/cta-section';
-import { HeroSection } from '@/features/landing/sections/hero-section';
-import { HowItWorksSection } from '@/features/landing/sections/how-it-works-section';
-import { LandingNavSection } from '@/features/landing/sections/landing-nav-section';
-import { MinimalFooter } from '@/features/landing/sections/minimal-footer';
-import { WhyDaometerSection } from '@/features/landing/sections/why-daometer-section';
+import { AboutSection } from '@/features/landing/sections/about';
+import { ActionCardsSection } from '@/features/landing/sections/action-cards';
+import { CtaSection } from '@/features/landing/sections/cta';
+import { HeroSection } from '@/features/landing/sections/hero';
+import { HowItWorksSection } from '@/features/landing/sections/how-it-works';
+import { LandingNavSection } from '@/features/landing/sections/nav';
+import { MinimalFooter } from '@/features/landing/sections/footer';
+import { WhyDaometerSection } from '@/features/landing/sections/why-daometer';
 
 export const LandingPage = (): JSX.Element => {
   const navigate = useNavigate();

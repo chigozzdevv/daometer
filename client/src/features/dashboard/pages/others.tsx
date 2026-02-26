@@ -1,7 +1,7 @@
-import { DashboardPageShell } from '@/features/dashboard/components/dashboard-page-shell';
+import { DashboardShell } from '@/features/dashboard/components/shell';
 
 export const DashboardOthersPage = (): JSX.Element => (
-  <DashboardPageShell title="Others" description="Auxiliary tools and integrations.">
+  <DashboardShell title="Others" description="Auxiliary tools and integrations.">
     <div className="simple-list">
       <article>
         <h3>Workflow event log</h3>
@@ -12,5 +12,5 @@ export const DashboardOthersPage = (): JSX.Element => (
         <p>Validate outbound notifications and delivery statuses.</p>
       </article>
     </div>
-  </DashboardPageShell>
+  </DashboardShell>
 );

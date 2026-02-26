@@ -1,7 +1,7 @@
-import { DashboardPageShell } from '@/features/dashboard/components/dashboard-page-shell';
+import { DashboardShell } from '@/features/dashboard/components/shell';
 
 export const DashboardFlowsPage = (): JSX.Element => (
-  <DashboardPageShell title="Flows" description="Build and manage proposal automation flows.">
+  <DashboardShell title="Flows" description="Build and manage proposal automation flows.">
     <div className="simple-list">
       <article>
         <h3>Treasury Safety Flow</h3>
@@ -12,5 +12,5 @@ export const DashboardFlowsPage = (): JSX.Element => (
         <p>Trigger email 5 hours before voting end and queue execution on success.</p>
       </article>
     </div>
-  </DashboardPageShell>
+  </DashboardShell>
 );

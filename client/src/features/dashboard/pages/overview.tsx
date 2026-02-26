@@ -1,8 +1,8 @@
-import { DashboardPageShell } from '@/features/dashboard/components/dashboard-page-shell';
-import { MetricCard } from '@/features/dashboard/components/metric-card';
+import { DashboardShell } from '@/features/dashboard/components/shell';
+import { MetricCard } from '@/features/dashboard/components/metric';
 
 export const DashboardOverviewPage = (): JSX.Element => (
-  <DashboardPageShell
+  <DashboardShell
     title="Overview"
     description="Track proposal health, workflow coverage, and execution stability from one place."
   >
@@ -12,5 +12,5 @@ export const DashboardOverviewPage = (): JSX.Element => (
       <MetricCard label="Failed jobs" value="1" />
       <MetricCard label="Workflow rules" value="9" />
     </div>
-  </DashboardPageShell>
+  </DashboardShell>
 );
