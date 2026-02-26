@@ -1,0 +1,44 @@
+{
+  "name": "daometer-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DAO automation backend and worker",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
+    "start": "node dist/server.js",
+    "worker:dev": "tsx watch src/worker/index.ts",
+    "worker:start": "node dist/worker/index.js",
+    "seed:dev": "tsx src/scripts/seed-dev.ts",
+    "type-check": "tsc --noEmit",
+    "test": "npm run build && node --test dist/**/*.test.js"
+  },
+  "dependencies": {
+    "@realms-today/spl-governance": "^0.3.33",
+    "@solana/web3.js": "^1.98.4",
+    "bcryptjs": "^2.4.3",
+    "bn.js": "^5.2.3",
+    "bs58": "^6.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^4.21.2",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.12.2",
+    "pino": "^9.6.0",
+    "pino-http": "^10.4.0",
+    "pino-pretty": "^13.0.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.1",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.13.10",
+    "tsc-alias": "^1.8.11",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}
