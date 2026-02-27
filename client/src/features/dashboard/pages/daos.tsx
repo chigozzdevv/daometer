@@ -92,10 +92,12 @@ const sendPreparedTransaction = async (
   transactionMessage: string,
   transactionBase64: string,
 ): Promise<string> => {
+  const errors: string[] = [];
+
   if (typeof provider.request === 'function') {
-    try {
-      const result = await provider.request({
-        method: 'signAndSendTransaction',
+    const requestVariants: Array<{ label: string; params: unknown }> = [
+      {
+        label: 'request(message-object)',
         params: {
           message: transactionMessage,
           options: {
@@ -103,34 +105,92 @@ const sendPreparedTransaction = async (
             preflightCommitment: 'confirmed',
           },
         },
-      });
-      const signature = extractSignature(result);
+      },
+      {
+        label: 'request([message-object])',
+        params: [
+          {
+            message: transactionMessage,
+            options: {
+              skipPreflight: false,
+              preflightCommitment: 'confirmed',
+            },
+          },
+        ],
+      },
+      {
+        label: 'request(transaction-base64)',
+        params: {
+          transaction: transactionBase64,
+          encoding: 'base64',
+          options: {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed',
+          },
+        },
+      },
+      {
+        label: 'request([transaction-base64])',
+        params: [
+          {
+            transaction: transactionBase64,
+            encoding: 'base64',
+            options: {
+              skipPreflight: false,
+              preflightCommitment: 'confirmed',
+            },
+          },
+        ],
+      },
+    ];
 
-      if (signature) {
-        return signature;
+    for (const variant of requestVariants) {
+      try {
+        const result = await provider.request({
+          method: 'signAndSendTransaction',
+          params: variant.params,
+        });
+        const signature = extractSignature(result);
+
+        if (signature) {
+          return signature;
+        }
+      } catch (error) {
+        errors.push(
+          `${variant.label}: ${error instanceof Error ? error.message : 'unknown provider.request error'}`,
+        );
       }
-    } catch {
-      // fallback to non-standard params used by some injected providers
     }
   }
 
   if (typeof provider.signAndSendTransaction === 'function') {
-    try {
-      const transactionBytes = base64ToBytes(transactionBase64);
-      const result = await provider.signAndSendTransaction(transactionBytes, {
-        preflightCommitment: 'confirmed',
-      });
-      const signature = extractSignature(result);
+    const transactionBytes = base64ToBytes(transactionBase64);
+    const directVariants: Array<{ label: string; payload: unknown }> = [
+      { label: 'signAndSend(bytes)', payload: transactionBytes },
+      { label: 'signAndSend(base64-string)', payload: transactionBase64 },
+      { label: 'signAndSend(message-object)', payload: { message: transactionMessage } },
+    ];
 
-      if (signature) {
-        return signature;
+    for (const variant of directVariants) {
+      try {
+        const result = await provider.signAndSendTransaction(variant.payload, {
+          preflightCommitment: 'confirmed',
+        });
+        const signature = extractSignature(result);
+
+        if (signature) {
+          return signature;
+        }
+      } catch (error) {
+        errors.push(
+          `${variant.label}: ${error instanceof Error ? error.message : 'unknown signAndSendTransaction error'}`,
+        );
       }
-    } catch {
-      // no-op: emit a final error below
     }
   }
 
-  throw new Error('Wallet does not support signAndSendTransaction for prepared transactions.');
+  const details = errors[0] ? ` First error: ${errors[0]}` : '';
+  throw new Error(`Wallet could not sign and send the prepared transaction.${details}`);
 };
 
 export const DashboardDaosPage = (): JSX.Element => {
