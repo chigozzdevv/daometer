@@ -1290,6 +1290,31 @@ p {
   gap: 0.9rem;
 }
 
+.flow-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.flow-stepper-item {
+  border: var(--border);
+  background: var(--bg);
+  color: #555;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.5rem 0.7rem;
+  cursor: pointer;
+}
+
+.flow-stepper-item-active {
+  background: var(--yellow);
+  color: var(--black);
+  box-shadow: var(--shadow);
+}
+
 .flow-step-head {
   display: flex;
   align-items: flex-start;

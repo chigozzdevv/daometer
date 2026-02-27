@@ -431,6 +431,8 @@ export const getDaos = async (options: ListOptions = {}): Promise<DaoItem[]> =>
     })}`,
   );
 
+export const getDaoById = async (daoId: string): Promise<DaoItem> => apiRequest<DaoItem>(`/daos/${daoId}`);
+
 export const createDao = async (input: CreateDaoInput, accessToken: string): Promise<DaoItem> =>
   apiRequest<DaoItem>('/daos', {
     method: 'POST',

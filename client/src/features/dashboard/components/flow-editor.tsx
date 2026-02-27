@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   compileInlineFlow,
+  getDaoById,
+  getDaoGovernances,
   getFlowById,
   publishFlow,
+  type DaoGovernanceItem,
+  type DaoItem,
   type FlowBlockInput,
   type FlowCompilationResult,
   type FlowGraph,
@@ -301,12 +305,19 @@ type FlowEditorProps = {
   onFlowPublished: (result: PublishFlowResult) => void;
 };
 
+type EditorStep = 'builder' | 'compile' | 'publish';
+
 export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }: FlowEditorProps): JSX.Element => {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const autosaveTimerRef = useRef<number | null>(null);
 
+  const [activeStep, setActiveStep] = useState<EditorStep>('builder');
   const [flowName, setFlowName] = useState('');
   const [flowDescription, setFlowDescription] = useState('');
+  const [flowDaoId, setFlowDaoId] = useState('');
+  const [daoContext, setDaoContext] = useState<DaoItem | null>(null);
+  const [governanceOptions, setGovernanceOptions] = useState<DaoGovernanceItem[]>([]);
+  const [isLoadingDaoContext, setIsLoadingDaoContext] = useState(false);
   const [isLoadingFlow, setIsLoadingFlow] = useState(true);
   const [isHydrating, setIsHydrating] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
@@ -337,6 +348,11 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
   const [compileContextJson, setCompileContextJson] = useState('{}');
   const [compileResult, setCompileResult] = useState<FlowCompilationResult | null>(null);
   const [lastPublishResult, setLastPublishResult] = useState<PublishFlowResult | null>(null);
+  const [publishOnchainNow, setPublishOnchainNow] = useState(true);
+  const [publishRealmAddress, setPublishRealmAddress] = useState('');
+  const [publishGovernanceProgramId, setPublishGovernanceProgramId] = useState('');
+  const [publishGovernanceAddress, setPublishGovernanceAddress] = useState('');
+  const [publishGoverningTokenMint, setPublishGoverningTokenMint] = useState('');
 
   const graphNodeMap = useMemo(() => new Map(graphNodes.map((node) => [node.id, node])), [graphNodes]);
   const getNodeWidth = (nodeId: string): number => nodeWidths[nodeId] ?? defaultNodeWidth;
@@ -409,12 +425,14 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
 
       setFlowName(flow.name);
       setFlowDescription(flow.description ?? '');
+      setFlowDaoId(flow.daoId);
       setBlocks(loadedBlocks);
       setGraphNodes(normalizedGraph.nodes);
       setGraphEdges(normalizedGraph.edges);
       setNodeWidths(
         Object.fromEntries(normalizedGraph.nodes.map((node) => [node.id, defaultNodeWidth])),
       );
+      setActiveStep('builder');
       setPendingLinkSourceId(null);
       setIsDirty(false);
       setCompileResult(null);
@@ -433,6 +451,67 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
     void hydrateFlow();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flowId]);
+
+  useEffect(() => {
+    if (!flowDaoId) {
+      setDaoContext(null);
+      setGovernanceOptions([]);
+      setPublishRealmAddress('');
+      setPublishGovernanceProgramId('');
+      setPublishGovernanceAddress('');
+      setPublishGoverningTokenMint('');
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadDaoContext = async (): Promise<void> => {
+      setIsLoadingDaoContext(true);
+
+      try {
+        const [dao, governanceResponse] = await Promise.all([getDaoById(flowDaoId), getDaoGovernances(flowDaoId)]);
+
+        if (!isMounted) {
+          return;
+        }
+
+        setDaoContext(dao);
+        setGovernanceOptions(governanceResponse.items);
+        setPublishRealmAddress(dao.realmAddress);
+        setPublishGovernanceProgramId(dao.governanceProgramId);
+        setPublishGoverningTokenMint(dao.communityMint ?? '');
+        setPublishGovernanceAddress((current) => {
+          if (current && governanceResponse.items.some((item) => item.address === current)) {
+            return current;
+          }
+
+          return governanceResponse.items[0]?.address ?? '';
+        });
+      } catch (loadError) {
+        if (!isMounted) {
+          return;
+        }
+
+        setDaoContext(null);
+        setGovernanceOptions([]);
+        setPublishRealmAddress('');
+        setPublishGovernanceProgramId('');
+        setPublishGovernanceAddress('');
+        setPublishGoverningTokenMint('');
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load DAO context for publishing');
+      } finally {
+        if (isMounted) {
+          setIsLoadingDaoContext(false);
+        }
+      }
+    };
+
+    void loadDaoContext();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [flowDaoId]);
 
   useEffect(() => {
     if (!draggingNode) {
@@ -660,6 +739,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
       const result = await compileInlineFlow(payload.blocks, context, accessToken);
 
       setCompileResult(result);
+      setActiveStep('compile');
       setSuccess('Compile complete. You can now publish.');
     } catch (compileError) {
       setError(compileError instanceof Error ? compileError.message : 'Compile failed');
@@ -674,6 +754,28 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
       return;
     }
 
+    if (publishOnchainNow) {
+      if (!publishRealmAddress.trim()) {
+        setError('Realm address is required for on-chain publish.');
+        return;
+      }
+
+      if (!publishGovernanceProgramId.trim()) {
+        setError('Governance program ID is required for on-chain publish.');
+        return;
+      }
+
+      if (!publishGovernanceAddress.trim()) {
+        setError('Governance account is required for on-chain publish.');
+        return;
+      }
+
+      if (!publishGoverningTokenMint.trim()) {
+        setError('Governing token mint is required for on-chain publish.');
+        return;
+      }
+    }
+
     setError(null);
     setSuccess(null);
     setIsPublishing(true);
@@ -685,7 +787,26 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
         return;
       }
 
-      const result = await publishFlow(flowId, {}, accessToken);
+      const result = await publishFlow(
+        flowId,
+        publishOnchainNow
+          ? {
+              onchainCreate: {
+                enabled: true,
+                governanceProgramId: publishGovernanceProgramId.trim(),
+                programVersion: 3,
+                realmAddress: publishRealmAddress.trim(),
+                governanceAddress: publishGovernanceAddress.trim(),
+                governingTokenMint: publishGoverningTokenMint.trim(),
+                optionIndex: 0,
+                useDenyOption: true,
+                signOff: true,
+                requireSimulation: true,
+              },
+            }
+          : {},
+        accessToken,
+      );
       setLastPublishResult(result);
       setSuccess('Flow published successfully.');
       onFlowPublished(result);
@@ -991,6 +1112,33 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
   return (
     <section className="flow-builder-shell">
       <article className="flow-step-card">
+        <div className="flow-stepper">
+          <button
+            type="button"
+            className={`flow-stepper-item ${activeStep === 'builder' ? 'flow-stepper-item-active' : ''}`}
+            onClick={() => setActiveStep('builder')}
+          >
+            1. Builder
+          </button>
+          <button
+            type="button"
+            className={`flow-stepper-item ${activeStep === 'compile' ? 'flow-stepper-item-active' : ''}`}
+            onClick={() => setActiveStep('compile')}
+          >
+            2. Compile
+          </button>
+          <button
+            type="button"
+            className={`flow-stepper-item ${activeStep === 'publish' ? 'flow-stepper-item-active' : ''}`}
+            onClick={() => setActiveStep('publish')}
+          >
+            3. Publish
+          </button>
+        </div>
+      </article>
+
+      {activeStep === 'builder' ? (
+        <article className="flow-step-card">
         <header className="flow-step-head">
           <span className="flow-step-index">Builder</span>
           <div>
@@ -1134,8 +1282,20 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
             ))}
           </div>
         ) : null}
+        <div className="button-row">
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => setActiveStep('compile')}
+            disabled={isAutoSaving}
+          >
+            Next: Compile
+          </button>
+        </div>
       </article>
+      ) : null}
 
+      {activeStep === 'compile' ? (
       <article className="flow-step-card">
         <header className="flow-step-head">
           <span className="flow-step-index">Compile</span>
@@ -1180,18 +1340,108 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
         ) : (
           <p className="hint-text">Compile before publishing.</p>
         )}
-      </article>
 
+        <div className="button-row">
+          <button type="button" className="secondary-button" onClick={() => setActiveStep('builder')}>
+            Back: Builder
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => setActiveStep('publish')}
+            disabled={!compileResult}
+          >
+            Next: Publish
+          </button>
+        </div>
+      </article>
+      ) : null}
+
+      {activeStep === 'publish' ? (
       <article className="flow-step-card">
         <header className="flow-step-head">
           <span className="flow-step-index">Publish</span>
           <div>
             <h2>Publish Proposal</h2>
-            <p>Publish is unlocked only after a successful compile.</p>
+            <p>Create a proposal record and optionally create/sign-off on-chain in Realms.</p>
           </div>
         </header>
 
+        <label className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={publishOnchainNow}
+            onChange={(event) => setPublishOnchainNow(event.target.checked)}
+          />
+          Publish on-chain now
+        </label>
+
+        {publishOnchainNow ? (
+          <div className="form-grid two-col">
+            <label className="input-label">
+              Realm address
+              <input
+                className="text-input"
+                value={publishRealmAddress}
+                onChange={(event) => setPublishRealmAddress(event.target.value)}
+              />
+            </label>
+            <label className="input-label">
+              Governance program ID
+              <input
+                className="text-input"
+                value={publishGovernanceProgramId}
+                onChange={(event) => setPublishGovernanceProgramId(event.target.value)}
+              />
+            </label>
+            <label className="input-label">
+              Governance account
+              <select
+                className="select-input"
+                value={publishGovernanceAddress}
+                onChange={(event) => setPublishGovernanceAddress(event.target.value)}
+                disabled={isLoadingDaoContext || governanceOptions.length === 0}
+              >
+                {governanceOptions.length === 0 ? (
+                  <option value="">
+                    {isLoadingDaoContext ? 'Loading governance accounts...' : 'No governance accounts found'}
+                  </option>
+                ) : null}
+                {governanceOptions.map((item) => (
+                  <option key={item.address} value={item.address}>
+                    {item.address}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="input-label">
+              Governing token mint
+              <input
+                className="text-input"
+                value={publishGoverningTokenMint}
+                onChange={(event) => setPublishGoverningTokenMint(event.target.value)}
+              />
+            </label>
+          </div>
+        ) : null}
+
+        {publishOnchainNow && daoContext ? (
+          <div className="dao-card-actions">
+            <a
+              className="secondary-button"
+              href={`https://app.realms.today/dao/${daoContext.realmAddress}${daoContext.network === 'devnet' ? '?cluster=devnet' : ''}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open DAO in Realms
+            </a>
+          </div>
+        ) : null}
+
         <div className="button-row">
+          <button type="button" className="secondary-button" onClick={() => setActiveStep('compile')}>
+            Back: Compile
+          </button>
           <button
             type="button"
             className="primary-button"
@@ -1203,6 +1453,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
         </div>
 
         {isDirty ? <p className="hint-text">Waiting for auto-save before publish...</p> : null}
+        {!compileResult ? <p className="error-text">Compile is required before publish.</p> : null}
 
         {lastPublishResult ? (
           <div className="result-shell">
@@ -1210,6 +1461,9 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
               Proposal ID: <strong>{lastPublishResult.proposalId}</strong>
             </p>
             <p>Flow status: {lastPublishResult.flow.status}</p>
+            <p>
+              Proposal monitor: <a href="/dashboard/proposals">Open Proposals page</a>
+            </p>
             {lastPublishResult.onchainCreation ? (
               <>
                 <p>On-chain signatures: {lastPublishResult.onchainCreation.signatures.length}</p>
@@ -1225,6 +1479,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
           <p className="hint-text">No publish action yet.</p>
         )}
       </article>
+      ) : null}
 
       {error ? <p className="error-text">{error}</p> : null}
       {success ? <p className="success-text">{success}</p> : null}
