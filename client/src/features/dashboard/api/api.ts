@@ -157,6 +157,25 @@ export type CreateProposalInput = {
   };
 };
 
+export type CreateProposalOnchainInput = {
+  governanceProgramId?: string;
+  programVersion: number;
+  realmAddress: string;
+  governanceAddress: string;
+  governingTokenMint: string;
+  descriptionLink?: string;
+  optionIndex?: number;
+  useDenyOption?: boolean;
+  rpcUrl?: string;
+  signOff?: boolean;
+  requireSimulation?: boolean;
+};
+
+export type CreateProposalOnchainResult = {
+  proposal: ProposalItem;
+  signatures: string[];
+};
+
 export type WorkflowItem = {
   id: string;
   daoId: string;
@@ -480,6 +499,23 @@ export const createProposal = async (
   apiRequest<ProposalItem>('/proposals', {
     method: 'POST',
     body: input as unknown as Record<string, unknown>,
+    accessToken,
+  });
+
+export const createProposalOnchain = async (
+  proposalId: string,
+  input: CreateProposalOnchainInput,
+  accessToken: string,
+): Promise<CreateProposalOnchainResult> =>
+  apiRequest<CreateProposalOnchainResult>(`/proposals/${proposalId}/onchain-create`, {
+    method: 'POST',
+    body: {
+      ...input,
+      optionIndex: input.optionIndex ?? 0,
+      useDenyOption: input.useDenyOption ?? true,
+      signOff: input.signOff ?? true,
+      requireSimulation: input.requireSimulation ?? true,
+    },
     accessToken,
   });
 

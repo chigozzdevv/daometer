@@ -1303,6 +1303,57 @@ p {
   flex-wrap: wrap;
 }
 
+.flow-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.flow-canvas {
+  border: var(--border);
+  background: var(--bg);
+  padding: 0.7rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.flow-node-wrap {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.flow-node-card {
+  border: var(--border);
+  background: var(--white);
+  padding: 0.65rem;
+  display: grid;
+  gap: 0.55rem;
+  cursor: grab;
+}
+
+.flow-node-card:active {
+  cursor: grabbing;
+}
+
+.flow-node-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.flow-node-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.flow-connector {
+  text-align: center;
+  font-size: 0.95rem;
+  color: #666;
+}
+
 .subheading {
   font-size: 0.94rem;
   font-weight: 800;

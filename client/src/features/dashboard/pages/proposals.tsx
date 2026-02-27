@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/app/providers/auth-provider';
-import { createProposal, getDaoProposals, getDaos, type DaoItem, type ProposalItem } from '@/features/dashboard/api/api';
+import {
+  createProposal,
+  createProposalOnchain,
+  getDaoProposals,
+  getDaos,
+  type DaoItem,
+  type ProposalItem,
+} from '@/features/dashboard/api/api';
 import { DaoSelect } from '@/features/dashboard/components/dao-select';
 import { DashboardShell } from '@/features/dashboard/components/shell';
 import { ErrorState, LoadingState } from '@/features/dashboard/components/state';
@@ -54,11 +61,22 @@ export const DashboardProposalsPage = (): JSX.Element => {
   const [createDescription, setCreateDescription] = useState('');
   const [createVoteScope, setCreateVoteScope] = useState<'community' | 'council'>('community');
   const [createVotingHours, setCreateVotingHours] = useState('72');
+  const [createOnchainNow, setCreateOnchainNow] = useState(true);
+  const [createGovernanceAddress, setCreateGovernanceAddress] = useState('');
+  const [createGoverningTokenMint, setCreateGoverningTokenMint] = useState('');
 
   const selectedDao = useMemo(
     () => daos.find((dao) => dao.id === selectedDaoId) ?? null,
     [daos, selectedDaoId],
   );
+
+  useEffect(() => {
+    if (!selectedDao) {
+      return;
+    }
+
+    setCreateGoverningTokenMint((current) => current || selectedDao.communityMint || '');
+  }, [selectedDao]);
 
   useEffect(() => {
     let isMounted = true;
@@ -170,12 +188,50 @@ export const DashboardProposalsPage = (): JSX.Element => {
         session.accessToken,
       );
 
-      setProposals((current) => [created, ...current]);
-      setCreateSuccess(`Draft proposal "${created.title}" created.`);
+      let finalProposal = created;
+
+      if (createOnchainNow) {
+        if (!selectedDao) {
+          throw new Error('Selected DAO context missing for on-chain creation.');
+        }
+
+        if (!createGovernanceAddress.trim()) {
+          throw new Error('Governance address is required for on-chain creation.');
+        }
+
+        if (!createGoverningTokenMint.trim()) {
+          throw new Error('Governing token mint is required for on-chain creation.');
+        }
+
+        const onchain = await createProposalOnchain(
+          created.id,
+          {
+            governanceProgramId: selectedDao.governanceProgramId,
+            programVersion: 3,
+            realmAddress: selectedDao.realmAddress,
+            governanceAddress: createGovernanceAddress.trim(),
+            governingTokenMint: createGoverningTokenMint.trim(),
+            signOff: true,
+            useDenyOption: true,
+            requireSimulation: true,
+          },
+          session.accessToken,
+        );
+
+        finalProposal = onchain.proposal;
+      }
+
+      setProposals((current) => [finalProposal, ...current]);
+      setCreateSuccess(
+        createOnchainNow
+          ? `Proposal "${finalProposal.title}" created on-chain and synced.`
+          : `Draft proposal "${finalProposal.title}" created.`,
+      );
       setCreateTitle('');
       setCreateDescription('');
       setCreateVoteScope('community');
       setCreateVotingHours('72');
+      setCreateOnchainNow(true);
       setIsCreateModalOpen(false);
     } catch (createProposalError) {
       if (createProposalError instanceof ApiRequestError) {
@@ -288,7 +344,7 @@ export const DashboardProposalsPage = (): JSX.Element => {
             }}
           >
             <h3>Create Proposal</h3>
-            <p>This creates an internal draft proposal record in Daometer for the selected DAO.</p>
+            <p>Create a proposal and optionally push it on-chain immediately for your Realm.</p>
 
             <label className="input-label">
               Title
@@ -337,12 +393,45 @@ export const DashboardProposalsPage = (): JSX.Element => {
               />
             </label>
 
+            <label className="checkbox-field">
+              <input
+                type="checkbox"
+                checked={createOnchainNow}
+                onChange={(event) => setCreateOnchainNow(event.target.checked)}
+              />
+              Create on-chain now
+            </label>
+
+            {createOnchainNow ? (
+              <>
+                <label className="input-label">
+                  Governance address
+                  <input
+                    className="text-input"
+                    value={createGovernanceAddress}
+                    onChange={(event) => setCreateGovernanceAddress(event.target.value)}
+                    required
+                  />
+                </label>
+
+                <label className="input-label">
+                  Governing token mint
+                  <input
+                    className="text-input"
+                    value={createGoverningTokenMint}
+                    onChange={(event) => setCreateGoverningTokenMint(event.target.value)}
+                    required
+                  />
+                </label>
+              </>
+            ) : null}
+
             <div className="modal-actions">
               <button type="button" className="secondary-button" disabled={isCreating} onClick={() => setIsCreateModalOpen(false)}>
                 Cancel
               </button>
               <button type="submit" className="primary-button" disabled={isCreating}>
-                {isCreating ? 'Creating...' : 'Create Draft'}
+                {isCreating ? 'Creating...' : createOnchainNow ? 'Create On-chain Proposal' : 'Create Draft'}
               </button>
             </div>
           </form>

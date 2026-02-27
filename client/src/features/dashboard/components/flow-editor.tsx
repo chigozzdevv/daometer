@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   compileFlowById,
   compileInlineFlow,
@@ -6,6 +6,7 @@ import {
   getFlowById,
   publishFlow,
   type DaoItem,
+  type FlowBlockInput,
   type FlowCompilationResult,
   type FlowItem,
   type FlowProposalDefaults,
@@ -15,15 +16,22 @@ import {
 import { formatDateTime } from '@/features/dashboard/lib/format';
 
 const newFlowKey = '__new-flow';
-const defaultBlocks = [
-  {
-    id: 'block-1',
-    type: 'transfer-sol',
-    label: 'Treasury transfer',
-    fromGovernance: '',
-    toWallet: '',
-    lamports: 1_000_000,
-  },
+
+type SupportedBlockType =
+  | 'transfer-sol'
+  | 'transfer-spl'
+  | 'set-governance-config'
+  | 'program-upgrade'
+  | 'create-stream'
+  | 'custom-instruction';
+
+const supportedBlockTypes: Array<{ value: SupportedBlockType; label: string }> = [
+  { value: 'transfer-sol', label: 'Transfer SOL' },
+  { value: 'transfer-spl', label: 'Transfer SPL' },
+  { value: 'set-governance-config', label: 'Set Governance Config' },
+  { value: 'program-upgrade', label: 'Program Upgrade' },
+  { value: 'create-stream', label: 'Create Stream' },
+  { value: 'custom-instruction', label: 'Custom Instruction' },
 ];
 
 const defaultProposalDefaults: FlowProposalDefaults = {
@@ -37,7 +45,89 @@ const defaultProposalDefaults: FlowProposalDefaults = {
   maxRiskScore: 70,
 };
 
-const toPrettyJson = (value: unknown): string => JSON.stringify(value, null, 2);
+const makeBlockId = (): string => `block-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const defaultBlockForType = (type: SupportedBlockType): FlowBlockInput => {
+  if (type === 'transfer-sol') {
+    return {
+      id: makeBlockId(),
+      type,
+      label: 'Treasury transfer',
+      fromGovernance: '',
+      toWallet: '',
+      lamports: 1_000_000,
+    };
+  }
+
+  if (type === 'transfer-spl') {
+    return {
+      id: makeBlockId(),
+      type,
+      label: 'Token transfer',
+      tokenMint: '',
+      fromTokenAccount: '',
+      toTokenAccount: '',
+      amount: '1',
+      decimals: 6,
+    };
+  }
+
+  if (type === 'set-governance-config') {
+    return {
+      id: makeBlockId(),
+      type,
+      label: 'Governance config update',
+      governanceAddress: '',
+      yesVoteThresholdPercent: 60,
+      baseVotingTimeSeconds: 259200,
+      minInstructionHoldUpTimeSeconds: 0,
+      communityVetoThresholdPercent: 0,
+    };
+  }
+
+  if (type === 'program-upgrade') {
+    return {
+      id: makeBlockId(),
+      type,
+      label: 'Upgrade program',
+      programId: '',
+      bufferAddress: '',
+      spillAddress: '',
+    };
+  }
+
+  if (type === 'create-stream') {
+    const now = new Date();
+    const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    return {
+      id: makeBlockId(),
+      type,
+      label: 'Create stream',
+      streamProgramId: '',
+      treasuryTokenAccount: '',
+      recipientWallet: '',
+      tokenMint: '',
+      totalAmount: '100',
+      startAt: now.toISOString(),
+      endAt: in30Days.toISOString(),
+      canCancel: true,
+    };
+  }
+
+  return {
+    id: makeBlockId(),
+    type: 'custom-instruction',
+    label: 'Custom instruction',
+    programId: '',
+    dataBase64: '',
+    kind: 'custom',
+    accounts: [],
+    accountsCsv: '',
+  };
+};
+
+const defaultBlocks: FlowBlockInput[] = [defaultBlockForType('transfer-sol')];
 
 const parseJson = <TValue,>(raw: string, label: string): TValue => {
   try {
@@ -63,6 +153,38 @@ const toTags = (value: string): string[] =>
     .map((entry) => entry.trim())
     .filter(Boolean);
 
+const getString = (value: unknown, fallback = ''): string => (typeof value === 'string' ? value : fallback);
+
+const getNumber = (value: unknown, fallback = 0): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  return fallback;
+};
+
+const getBoolean = (value: unknown, fallback = false): boolean =>
+  typeof value === 'boolean' ? value : fallback;
+
+const reorderBlocks = (blocks: FlowBlockInput[], sourceId: string, targetId: string): FlowBlockInput[] => {
+  const sourceIndex = blocks.findIndex((block) => getString(block.id) === sourceId);
+  const targetIndex = blocks.findIndex((block) => getString(block.id) === targetId);
+
+  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) {
+    return blocks;
+  }
+
+  const next = [...blocks];
+  const [sourceBlock] = next.splice(sourceIndex, 1);
+  next.splice(targetIndex, 0, sourceBlock);
+  return next;
+};
+
 type FlowEditorProps = {
   accessToken: string;
   selectedDaoId: string;
@@ -85,6 +207,7 @@ export const FlowEditor = ({
   const [isSaving, setIsSaving] = useState(false);
   const [isCompiling, setIsCompiling] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -92,7 +215,7 @@ export const FlowEditor = ({
   const [description, setDescription] = useState('');
   const [tagsInput, setTagsInput] = useState('');
   const [status, setStatus] = useState<'draft' | 'published' | 'archived'>('draft');
-  const [blocksJson, setBlocksJson] = useState(toPrettyJson(defaultBlocks));
+  const [blocks, setBlocks] = useState<FlowBlockInput[]>(defaultBlocks);
 
   const [titlePrefix, setTitlePrefix] = useState(defaultProposalDefaults.titlePrefix);
   const [proposalVoteScope, setProposalVoteScope] = useState<'community' | 'council'>(defaultProposalDefaults.voteScope);
@@ -116,7 +239,7 @@ export const FlowEditor = ({
   const [publishExecuteAfterHoldUp, setPublishExecuteAfterHoldUp] = useState(true);
   const [publishMaxRiskScore, setPublishMaxRiskScore] = useState('70');
 
-  const [onchainCreateEnabled, setOnchainCreateEnabled] = useState(false);
+  const [onchainCreateEnabled, setOnchainCreateEnabled] = useState(true);
   const [onchainGovernanceProgramId, setOnchainGovernanceProgramId] = useState('');
   const [onchainProgramVersion, setOnchainProgramVersion] = useState('3');
   const [onchainRealmAddress, setOnchainRealmAddress] = useState('');
@@ -138,13 +261,23 @@ export const FlowEditor = ({
 
   const selectedDao = useMemo(() => daos.find((dao) => dao.id === selectedDaoId) ?? null, [daos, selectedDaoId]);
 
+  useEffect(() => {
+    if (!selectedDao) {
+      return;
+    }
+
+    setOnchainGovernanceProgramId((current) => current || selectedDao.governanceProgramId);
+    setOnchainRealmAddress((current) => current || selectedDao.realmAddress);
+    setOnchainGoverningTokenMint((current) => current || selectedDao.communityMint || '');
+  }, [selectedDao]);
+
   const resetForNewFlow = (): void => {
     setActiveFlowId(newFlowKey);
     setName('');
     setDescription('');
     setTagsInput('');
     setStatus('draft');
-    setBlocksJson(toPrettyJson(defaultBlocks));
+    setBlocks(defaultBlocks);
     setTitlePrefix(defaultProposalDefaults.titlePrefix);
     setProposalVoteScope(defaultProposalDefaults.voteScope);
     setProposalState(defaultProposalDefaults.state);
@@ -171,7 +304,7 @@ export const FlowEditor = ({
       setDescription(flow.description ?? '');
       setTagsInput((flow.tags ?? []).join(', '));
       setStatus(flow.status);
-      setBlocksJson(toPrettyJson(flow.blocks));
+      setBlocks(Array.isArray(flow.blocks) && flow.blocks.length > 0 ? flow.blocks : defaultBlocks);
       setTitlePrefix(flow.proposalDefaults.titlePrefix);
       setProposalVoteScope(flow.proposalDefaults.voteScope);
       setProposalState(flow.proposalDefaults.state);
@@ -189,20 +322,89 @@ export const FlowEditor = ({
     }
   };
 
+  const normalizeBlocksForApi = (items: FlowBlockInput[]): FlowBlockInput[] =>
+    items.map((block) => {
+      const type = getString(block.type) as SupportedBlockType;
+
+      if (type === 'transfer-sol') {
+        return {
+          ...block,
+          type,
+          label: getString(block.label, 'Treasury transfer'),
+          lamports: getNumber(block.lamports, 0),
+        };
+      }
+
+      if (type === 'transfer-spl') {
+        return {
+          ...block,
+          type,
+          label: getString(block.label, 'Token transfer'),
+          amount: getString(block.amount, '0'),
+          decimals: getNumber(block.decimals, 0),
+        };
+      }
+
+      if (type === 'set-governance-config') {
+        return {
+          ...block,
+          type,
+          yesVoteThresholdPercent: getNumber(block.yesVoteThresholdPercent, 0),
+          baseVotingTimeSeconds: getNumber(block.baseVotingTimeSeconds, 0),
+          minInstructionHoldUpTimeSeconds: getNumber(block.minInstructionHoldUpTimeSeconds, 0),
+          communityVetoThresholdPercent:
+            block.communityVetoThresholdPercent === undefined ? undefined : getNumber(block.communityVetoThresholdPercent, 0),
+        };
+      }
+
+      if (type === 'program-upgrade') {
+        return {
+          ...block,
+          type,
+        };
+      }
+
+      if (type === 'create-stream') {
+        return {
+          ...block,
+          type,
+          totalAmount: getString(block.totalAmount, '0'),
+          canCancel: getBoolean(block.canCancel, true),
+        };
+      }
+
+      if (type === 'custom-instruction') {
+        const accountsCsv = getString(block.accountsCsv, '');
+        const accounts = accountsCsv
+          .split(',')
+          .map((entry) => entry.trim())
+          .filter(Boolean)
+          .map((pubkey) => ({ pubkey, isSigner: false, isWritable: false }));
+
+        return {
+          id: getString(block.id, makeBlockId()),
+          type,
+          label: getString(block.label, 'Custom instruction'),
+          programId: getString(block.programId),
+          kind: getString(block.kind, 'custom'),
+          dataBase64: getString(block.dataBase64),
+          accounts,
+        };
+      }
+
+      return block;
+    });
+
   const buildFlowPayload = (): {
     name: string;
     description: string;
     tags: string[];
-    blocks: Record<string, unknown>[];
+    blocks: FlowBlockInput[];
     proposalDefaults: FlowProposalDefaults;
   } => {
-    const parsedBlocks = parseJson<unknown>(blocksJson, 'Blocks');
-
-    if (!Array.isArray(parsedBlocks) || parsedBlocks.length === 0) {
-      throw new Error('Blocks JSON must be a non-empty array');
+    if (!Array.isArray(blocks) || blocks.length === 0) {
+      throw new Error('Add at least one block to the flow');
     }
-
-    const parsedContextBlocks = parsedBlocks as Record<string, unknown>[];
 
     const payloadName = name.trim();
 
@@ -210,11 +412,27 @@ export const FlowEditor = ({
       throw new Error('Flow name must be at least 2 characters');
     }
 
+    const normalizedBlocks = normalizeBlocksForApi(blocks);
+
+    normalizedBlocks.forEach((block, index) => {
+      if (!getString(block.id)) {
+        throw new Error(`Block ${index + 1} must have an id`);
+      }
+
+      if (!getString(block.type)) {
+        throw new Error(`Block ${index + 1} must have a type`);
+      }
+
+      if (!getString(block.label)) {
+        throw new Error(`Block ${index + 1} must have a label`);
+      }
+    });
+
     return {
       name: payloadName,
       description: description.trim(),
       tags: toTags(tagsInput),
-      blocks: parsedContextBlocks,
+      blocks: normalizedBlocks,
       proposalDefaults: {
         titlePrefix: titlePrefix.trim(),
         voteScope: proposalVoteScope,
@@ -358,12 +576,218 @@ export const FlowEditor = ({
     }
   };
 
+  const addBlock = (type: SupportedBlockType): void => {
+    setBlocks((current) => [...current, defaultBlockForType(type)]);
+  };
+
+  const removeBlock = (blockId: string): void => {
+    setBlocks((current) => current.filter((block) => getString(block.id) !== blockId));
+  };
+
+  const changeBlockType = (blockId: string, nextType: SupportedBlockType): void => {
+    setBlocks((current) =>
+      current.map((block) => {
+        if (getString(block.id) !== blockId) {
+          return block;
+        }
+
+        const next = defaultBlockForType(nextType);
+        return {
+          ...next,
+          id: blockId,
+          label: getString(block.label, getString(next.label)),
+        };
+      }),
+    );
+  };
+
+  const setBlockField = (blockId: string, field: string, value: unknown): void => {
+    setBlocks((current) =>
+      current.map((block) => {
+        if (getString(block.id) !== blockId) {
+          return block;
+        }
+
+        return {
+          ...block,
+          [field]: value,
+        };
+      }),
+    );
+  };
+
+  const onBlockDrop = (targetBlockId: string): void => {
+    if (!draggingBlockId || draggingBlockId === targetBlockId) {
+      return;
+    }
+
+    setBlocks((current) => reorderBlocks(current, draggingBlockId, targetBlockId));
+    setDraggingBlockId(null);
+  };
+
+  const renderNodeFields = (block: FlowBlockInput): JSX.Element => {
+    const blockId = getString(block.id);
+    const type = getString(block.type) as SupportedBlockType;
+
+    if (type === 'transfer-sol') {
+      return (
+        <div className="form-grid two-col">
+          <label className="input-label">
+            From governance
+            <input className="text-input" value={getString(block.fromGovernance)} onChange={(event) => setBlockField(blockId, 'fromGovernance', event.target.value)} />
+          </label>
+          <label className="input-label">
+            To wallet
+            <input className="text-input" value={getString(block.toWallet)} onChange={(event) => setBlockField(blockId, 'toWallet', event.target.value)} />
+          </label>
+          <label className="input-label">
+            Lamports
+            <input className="text-input" type="number" min={0} value={getNumber(block.lamports, 0)} onChange={(event) => setBlockField(blockId, 'lamports', Number(event.target.value))} />
+          </label>
+        </div>
+      );
+    }
+
+    if (type === 'transfer-spl') {
+      return (
+        <div className="form-grid two-col">
+          <label className="input-label">
+            Token mint
+            <input className="text-input" value={getString(block.tokenMint)} onChange={(event) => setBlockField(blockId, 'tokenMint', event.target.value)} />
+          </label>
+          <label className="input-label">
+            Amount
+            <input className="text-input" value={getString(block.amount, '0')} onChange={(event) => setBlockField(blockId, 'amount', event.target.value)} />
+          </label>
+          <label className="input-label">
+            From token account
+            <input className="text-input" value={getString(block.fromTokenAccount)} onChange={(event) => setBlockField(blockId, 'fromTokenAccount', event.target.value)} />
+          </label>
+          <label className="input-label">
+            To token account
+            <input className="text-input" value={getString(block.toTokenAccount)} onChange={(event) => setBlockField(blockId, 'toTokenAccount', event.target.value)} />
+          </label>
+          <label className="input-label">
+            Decimals
+            <input className="text-input" type="number" min={0} max={18} value={getNumber(block.decimals, 6)} onChange={(event) => setBlockField(blockId, 'decimals', Number(event.target.value))} />
+          </label>
+        </div>
+      );
+    }
+
+    if (type === 'set-governance-config') {
+      return (
+        <div className="form-grid two-col">
+          <label className="input-label">
+            Governance address
+            <input className="text-input" value={getString(block.governanceAddress)} onChange={(event) => setBlockField(blockId, 'governanceAddress', event.target.value)} />
+          </label>
+          <label className="input-label">
+            Yes threshold (%)
+            <input className="text-input" type="number" min={0} max={100} value={getNumber(block.yesVoteThresholdPercent, 60)} onChange={(event) => setBlockField(blockId, 'yesVoteThresholdPercent', Number(event.target.value))} />
+          </label>
+          <label className="input-label">
+            Base voting time (sec)
+            <input className="text-input" type="number" min={0} value={getNumber(block.baseVotingTimeSeconds, 259200)} onChange={(event) => setBlockField(blockId, 'baseVotingTimeSeconds', Number(event.target.value))} />
+          </label>
+          <label className="input-label">
+            Hold-up time (sec)
+            <input className="text-input" type="number" min={0} value={getNumber(block.minInstructionHoldUpTimeSeconds, 0)} onChange={(event) => setBlockField(blockId, 'minInstructionHoldUpTimeSeconds', Number(event.target.value))} />
+          </label>
+        </div>
+      );
+    }
+
+    if (type === 'program-upgrade') {
+      return (
+        <div className="form-grid two-col">
+          <label className="input-label">
+            Program ID
+            <input className="text-input" value={getString(block.programId)} onChange={(event) => setBlockField(blockId, 'programId', event.target.value)} />
+          </label>
+          <label className="input-label">
+            Buffer address
+            <input className="text-input" value={getString(block.bufferAddress)} onChange={(event) => setBlockField(blockId, 'bufferAddress', event.target.value)} />
+          </label>
+          <label className="input-label">
+            Spill address
+            <input className="text-input" value={getString(block.spillAddress)} onChange={(event) => setBlockField(blockId, 'spillAddress', event.target.value)} />
+          </label>
+        </div>
+      );
+    }
+
+    if (type === 'create-stream') {
+      return (
+        <div className="form-grid two-col">
+          <label className="input-label">
+            Stream program ID
+            <input className="text-input" value={getString(block.streamProgramId)} onChange={(event) => setBlockField(blockId, 'streamProgramId', event.target.value)} />
+          </label>
+          <label className="input-label">
+            Treasury token account
+            <input className="text-input" value={getString(block.treasuryTokenAccount)} onChange={(event) => setBlockField(blockId, 'treasuryTokenAccount', event.target.value)} />
+          </label>
+          <label className="input-label">
+            Recipient wallet
+            <input className="text-input" value={getString(block.recipientWallet)} onChange={(event) => setBlockField(blockId, 'recipientWallet', event.target.value)} />
+          </label>
+          <label className="input-label">
+            Token mint
+            <input className="text-input" value={getString(block.tokenMint)} onChange={(event) => setBlockField(blockId, 'tokenMint', event.target.value)} />
+          </label>
+          <label className="input-label">
+            Total amount
+            <input className="text-input" value={getString(block.totalAmount, '0')} onChange={(event) => setBlockField(blockId, 'totalAmount', event.target.value)} />
+          </label>
+          <label className="input-label">
+            Start at (ISO datetime)
+            <input className="text-input" value={getString(block.startAt)} onChange={(event) => setBlockField(blockId, 'startAt', event.target.value)} />
+          </label>
+          <label className="input-label">
+            End at (ISO datetime)
+            <input className="text-input" value={getString(block.endAt)} onChange={(event) => setBlockField(blockId, 'endAt', event.target.value)} />
+          </label>
+          <label className="checkbox-field">
+            <input type="checkbox" checked={getBoolean(block.canCancel, true)} onChange={(event) => setBlockField(blockId, 'canCancel', event.target.checked)} />
+            Can cancel stream
+          </label>
+        </div>
+      );
+    }
+
+    return (
+      <div className="form-grid two-col">
+        <label className="input-label">
+          Program ID
+          <input className="text-input" value={getString(block.programId)} onChange={(event) => setBlockField(blockId, 'programId', event.target.value)} />
+        </label>
+        <label className="input-label">
+          Kind
+          <select className="select-input" value={getString(block.kind, 'custom')} onChange={(event) => setBlockField(blockId, 'kind', event.target.value)}>
+            <option value="custom">custom</option>
+            <option value="defi">defi</option>
+            <option value="governance">governance</option>
+          </select>
+        </label>
+        <label className="input-label">
+          Data (base64)
+          <textarea className="text-input code-input" value={getString(block.dataBase64)} onChange={(event) => setBlockField(blockId, 'dataBase64', event.target.value)} rows={3} />
+        </label>
+        <label className="input-label">
+          Accounts (comma-separated pubkeys)
+          <textarea className="text-input code-input" value={getString(block.accountsCsv)} onChange={(event) => setBlockField(blockId, 'accountsCsv', event.target.value)} rows={3} />
+        </label>
+      </div>
+    );
+  };
+
   return (
     <section className="editor-grid">
       <article className="editor-card">
         <header className="editor-header">
           <h2>Flow Studio</h2>
-          <p>Create, update, compile, and publish a flow with live backend APIs.</p>
+          <p>Build workflow logic using drag-and-drop blocks, then compile and publish.</p>
         </header>
 
         <div className="form-grid two-col">
@@ -429,15 +853,78 @@ export const FlowEditor = ({
           />
         </label>
 
-        <label className="input-label">
-          Blocks JSON
-          <textarea
-            className="text-input code-input"
-            value={blocksJson}
-            onChange={(event) => setBlocksJson(event.target.value)}
-            rows={14}
-          />
-        </label>
+        <h3 className="subheading">Blocks Canvas</h3>
+        <div className="flow-palette">
+          {supportedBlockTypes.map((typeItem) => (
+            <button
+              key={typeItem.value}
+              type="button"
+              className="secondary-button"
+              onClick={() => addBlock(typeItem.value)}
+            >
+              + {typeItem.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flow-canvas">
+          {blocks.map((block, index) => {
+            const blockId = getString(block.id, makeBlockId());
+            const blockType = getString(block.type, 'transfer-sol') as SupportedBlockType;
+
+            return (
+              <div key={blockId} className="flow-node-wrap">
+                <article
+                  className="flow-node-card"
+                  draggable
+                  onDragStart={() => setDraggingBlockId(blockId)}
+                  onDragEnd={() => setDraggingBlockId(null)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={() => onBlockDrop(blockId)}
+                >
+                  <div className="flow-node-header">
+                    <div className="flow-node-title">
+                      <span className="status-chip status-chip--gray">#{index + 1}</span>
+                      <strong>{getString(block.label, 'Untitled block')}</strong>
+                    </div>
+                    <button type="button" className="secondary-button" onClick={() => removeBlock(blockId)}>
+                      Remove
+                    </button>
+                  </div>
+
+                  <div className="form-grid two-col">
+                    <label className="input-label">
+                      Label
+                      <input
+                        className="text-input"
+                        value={getString(block.label)}
+                        onChange={(event) => setBlockField(blockId, 'label', event.target.value)}
+                      />
+                    </label>
+                    <label className="input-label">
+                      Type
+                      <select
+                        className="select-input"
+                        value={blockType}
+                        onChange={(event) => changeBlockType(blockId, event.target.value as SupportedBlockType)}
+                      >
+                        {supportedBlockTypes.map((typeItem) => (
+                          <option key={typeItem.value} value={typeItem.value}>
+                            {typeItem.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  {renderNodeFields(block)}
+                </article>
+
+                {index < blocks.length - 1 ? <div className="flow-connector" aria-hidden="true">↓</div> : null}
+              </div>
+            );
+          })}
+        </div>
 
         <h3 className="subheading">Proposal Defaults</h3>
         <div className="form-grid four-col">
@@ -536,7 +1023,7 @@ export const FlowEditor = ({
       <article className="editor-card">
         <header className="editor-header">
           <h2>Publish Settings</h2>
-          <p>These settings are used when creating proposal from the flow.</p>
+          <p>Publishing creates a proposal record; enable on-chain creation to push directly to Realms.</p>
         </header>
 
         <div className="form-grid two-col">
@@ -616,24 +1103,20 @@ export const FlowEditor = ({
           </label>
         </div>
 
-        <h3 className="subheading">Onchain Create (Optional)</h3>
+        <h3 className="subheading">On-chain Proposal Creation</h3>
         <label className="checkbox-field">
           <input
             type="checkbox"
             checked={onchainCreateEnabled}
             onChange={(event) => setOnchainCreateEnabled(event.target.checked)}
           />
-          Enable auto onchain proposal creation
+          Create proposal on-chain during publish
         </label>
-        <p className="hint-text">
-          Auto-create execution supports compiled transfer-sol, transfer-spl, and custom-instruction blocks directly.
-          Config/program-upgrade/stream blocks require valid custom instruction bytes and metas.
-        </p>
 
         {onchainCreateEnabled ? (
           <div className="form-grid two-col">
             <label className="input-label">
-              Governance program id (optional)
+              Governance program id
               <input
                 className="text-input"
                 value={onchainGovernanceProgramId}
@@ -745,12 +1228,12 @@ export const FlowEditor = ({
             <p>Flow status: {lastPublishResult.flow.status}</p>
             {lastPublishResult.onchainCreation ? (
               <>
-                <p>Onchain signatures: {lastPublishResult.onchainCreation.signatures.length}</p>
-                <p>Onchain proposal: {lastPublishResult.onchainCreation.onchainProposalAddress ?? 'N/A'}</p>
+                <p>On-chain signatures: {lastPublishResult.onchainCreation.signatures.length}</p>
+                <p>On-chain proposal: {lastPublishResult.onchainCreation.onchainProposalAddress ?? 'N/A'}</p>
               </>
             ) : null}
             {lastPublishResult.onchainCreationError ? (
-              <p className="error-text">Onchain creation error: {lastPublishResult.onchainCreationError}</p>
+              <p className="error-text">On-chain creation error: {lastPublishResult.onchainCreationError}</p>
             ) : null}
             <p>Updated at: {formatDateTime(lastPublishResult.flow.updatedAt)}</p>
           </div>
