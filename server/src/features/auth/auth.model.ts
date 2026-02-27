@@ -3,12 +3,13 @@ import { type HydratedDocument, model, Schema } from 'mongoose';
 export type UserRole = 'member' | 'admin';
 
 export interface User {
-  fullName: string;
-  email: string;
-  passwordHash: string;
+  walletAddress: string;
+  displayName: string | null;
   roles: UserRole[];
   refreshTokenHash: string | null;
   refreshTokenExpiresAt: Date | null;
+  authNonce: string | null;
+  authNonceExpiresAt: Date | null;
   lastLoginAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -16,24 +17,17 @@ export interface User {
 
 const userSchema = new Schema<User>(
   {
-    fullName: {
-      type: String,
-      required: true,
-      trim: true,
-      minlength: 2,
-      maxlength: 120,
-    },
-    email: {
+    walletAddress: {
       type: String,
       required: true,
       unique: true,
-      lowercase: true,
       trim: true,
     },
-    passwordHash: {
+    displayName: {
       type: String,
-      required: true,
-      select: false,
+      default: null,
+      trim: true,
+      maxlength: 120,
     },
     roles: {
       type: [String],
@@ -45,6 +39,15 @@ const userSchema = new Schema<User>(
       default: null,
     },
     refreshTokenExpiresAt: {
+      type: Date,
+      default: null,
+    },
+    authNonce: {
+      type: String,
+      select: false,
+      default: null,
+    },
+    authNonceExpiresAt: {
       type: Date,
       default: null,
     },
@@ -60,8 +63,8 @@ const userSchema = new Schema<User>(
       transform: (_doc, ret: any) => {
         ret.id = ret._id;
         delete ret._id;
-        delete ret.passwordHash;
         delete ret.refreshTokenHash;
+        delete ret.authNonce;
         return ret;
       },
     },

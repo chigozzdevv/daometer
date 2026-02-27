@@ -5,7 +5,7 @@ declare global {
     interface Request {
       authUser?: {
         userId: Types.ObjectId;
-        email: string;
+        walletAddress?: string;
       };
     }
   }

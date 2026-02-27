@@ -1,19 +1,24 @@
 import type { Request, Response } from 'express';
 import { asyncHandler } from '@/shared/utils/async-handler.util';
 import { AppError } from '@/shared/errors/app-error';
-import { getUserProfile, loginUser, refreshSession, registerUser } from '@/features/auth/auth.service';
+import {
+  createWalletChallenge,
+  getUserProfile,
+  refreshSession,
+  verifyWalletChallenge,
+} from '@/features/auth/auth.service';
 
-export const register = asyncHandler(async (req: Request, res: Response) => {
-  const result = await registerUser(req.body);
+export const challenge = asyncHandler(async (req: Request, res: Response) => {
+  const result = await createWalletChallenge(req.body);
 
-  res.status(201).json({
+  res.status(200).json({
     success: true,
     data: result,
   });
 });
 
-export const login = asyncHandler(async (req: Request, res: Response) => {
-  const result = await loginUser(req.body);
+export const verify = asyncHandler(async (req: Request, res: Response) => {
+  const result = await verifyWalletChallenge(req.body);
 
   res.status(200).json({
     success: true,

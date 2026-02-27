@@ -1,26 +1,24 @@
 import { connectDatabase, disconnectDatabase } from '@/config/database.config';
 import { logger } from '@/config/logger.config';
 import { UserModel, type UserRole } from '@/features/auth/auth.model';
-import { registerUser } from '@/features/auth/auth.service';
 import { DaoModel } from '@/features/dao/dao.model';
 import { createDao } from '@/features/dao/dao.service';
 import { FlowModel } from '@/features/flow/flow.model';
 import { createFlow, publishFlow } from '@/features/flow/flow.service';
 
+const seedAdminWalletAddress = '9sVvS5dKv93wXZ8wUeC8v9dS2HgN4V64dAt4E6C5VpjR';
+
 const seed = async (): Promise<void> => {
   await connectDatabase();
 
-  const adminEmail = 'admin@daometer.dev';
-  let adminUser = await UserModel.findOne({ email: adminEmail });
+  let adminUser = await UserModel.findOne({ walletAddress: seedAdminWalletAddress });
 
   if (!adminUser) {
-    const session = await registerUser({
-      fullName: 'Daometer Admin',
-      email: adminEmail,
-      password: 'StrongPass123',
+    adminUser = await UserModel.create({
+      walletAddress: seedAdminWalletAddress,
+      displayName: 'Daometer Admin',
+      roles: ['admin'],
     });
-
-    adminUser = session.user;
     logger.info({ userId: adminUser.id }, 'Created seed admin user');
   }
 

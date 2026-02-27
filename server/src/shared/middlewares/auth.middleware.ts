@@ -6,7 +6,7 @@ import { AppError } from '@/shared/errors/app-error';
 
 type AuthTokenPayload = JwtPayload & {
   sub: string;
-  email: string;
+  walletAddress?: string;
 };
 
 export const requireAuth = (req: Request, _res: Response, next: NextFunction): void => {
@@ -29,7 +29,7 @@ export const requireAuth = (req: Request, _res: Response, next: NextFunction): v
 
     req.authUser = {
       userId: new Types.ObjectId(payload.sub),
-      email: payload.email,
+      walletAddress: payload.walletAddress,
     };
 
     next();

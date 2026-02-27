@@ -20,7 +20,7 @@ export const AuthProvider = ({ children }: PropsWithChildren): JSX.Element => {
       setSession(null);
 
       if (typeof window !== 'undefined' && window.location.pathname !== '/auth') {
-        window.location.assign('/auth?mode=login');
+        window.location.assign('/auth');
       }
     };
 

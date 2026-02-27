@@ -1,40 +1,92 @@
-import { type FormEvent, useMemo, useState } from 'react';
-import { loginRequest, registerRequest } from '@/features/auth/api/api';
+import { useState } from 'react';
+import {
+  createWalletChallengeRequest,
+  verifyWalletChallengeRequest,
+} from '@/features/auth/api/api';
 import { useAuth } from '@/app/providers/auth-provider';
 
-type AuthMode = 'login' | 'register';
-
 type AuthCardProps = {
-  initialMode: AuthMode;
   onAuthenticated: () => void;
 };
 
-export const AuthCard = ({ initialMode, onAuthenticated }: AuthCardProps): JSX.Element => {
-  const [mode, setMode] = useState<AuthMode>(initialMode);
-  const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+type SolanaProviderConnectResult = {
+  publicKey?: {
+    toBase58: () => string;
+  };
+};
+
+type SolanaProvider = {
+  isPhantom?: boolean;
+  publicKey?: {
+    toBase58: () => string;
+  };
+  connect: (options?: { onlyIfTrusted?: boolean }) => Promise<SolanaProviderConnectResult>;
+  signMessage: (message: Uint8Array, display?: 'utf8' | 'hex') => Promise<{ signature: Uint8Array }>;
+};
+
+const toBase64 = (value: Uint8Array): string => {
+  let binary = '';
+
+  value.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+
+  return window.btoa(binary);
+};
+
+const getSolanaProvider = (): SolanaProvider | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const candidate = (window as unknown as { solana?: SolanaProvider }).solana;
+
+  if (!candidate || typeof candidate.connect !== 'function' || typeof candidate.signMessage !== 'function') {
+    return null;
+  }
+
+  return candidate;
+};
+
+export const AuthCard = ({ onAuthenticated }: AuthCardProps): JSX.Element => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { signIn } = useAuth();
 
-  const title = useMemo(() => (mode === 'login' ? 'Welcome back' : 'Create your workspace account'), [mode]);
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault();
+  const handleConnectWallet = async (): Promise<void> => {
     setErrorMessage(null);
     setIsSubmitting(true);
 
     try {
-      const response =
-        mode === 'login'
-          ? await loginRequest({ email, password })
-          : await registerRequest({ fullName, email, password });
+      const provider = getSolanaProvider();
 
-      signIn({ accessToken: response.accessToken, refreshToken: response.refreshToken });
+      if (!provider) {
+        throw new Error('No Solana wallet detected. Install Phantom or another wallet extension.');
+      }
+
+      const connectResult = await provider.connect();
+      const walletAddress = connectResult.publicKey?.toBase58() ?? provider.publicKey?.toBase58();
+
+      if (!walletAddress) {
+        throw new Error('Wallet connection failed. Try reconnecting your wallet.');
+      }
+
+      const challenge = await createWalletChallengeRequest(walletAddress);
+      const encodedMessage = new TextEncoder().encode(challenge.message);
+      const signed = await provider.signMessage(encodedMessage, 'utf8');
+
+      const response = await verifyWalletChallengeRequest({
+        walletAddress: challenge.walletAddress,
+        signatureBase64: toBase64(signed.signature),
+      });
+
+      signIn({
+        accessToken: response.accessToken,
+        refreshToken: response.refreshToken,
+      });
       onAuthenticated();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Unable to authenticate');
+      setErrorMessage(error instanceof Error ? error.message : 'Unable to authenticate with wallet');
     } finally {
       setIsSubmitting(false);
     }
@@ -42,69 +94,14 @@ export const AuthCard = ({ initialMode, onAuthenticated }: AuthCardProps): JSX.E
 
   return (
     <article className="auth-card">
-      <div className="auth-mode-switch" role="tablist" aria-label="Authentication mode">
-        <button
-          type="button"
-          className={`tab-button${mode === 'login' ? ' tab-button-active' : ''}`}
-          onClick={() => setMode('login')}
-        >
-          Login
-        </button>
-        <button
-          type="button"
-          className={`tab-button${mode === 'register' ? ' tab-button-active' : ''}`}
-          onClick={() => setMode('register')}
-        >
-          Register
-        </button>
-      </div>
+      <h1>Connect wallet</h1>
+      <p>Authenticate with a Solana wallet signature to access your DAO automation workspace.</p>
 
-      <h1>{title}</h1>
-      <p>Connect to Daometer to manage flows, notifications, and execution automation.</p>
+      {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
 
-      <form className="auth-form" onSubmit={handleSubmit}>
-        {mode === 'register' ? (
-          <label className="input-label">
-            Full name
-            <input
-              className="text-input"
-              value={fullName}
-              onChange={(event) => setFullName(event.target.value)}
-              minLength={2}
-              required
-            />
-          </label>
-        ) : null}
-
-        <label className="input-label">
-          Email
-          <input
-            className="text-input"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
-        </label>
-
-        <label className="input-label">
-          Password
-          <input
-            className="text-input"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            minLength={8}
-            required
-          />
-        </label>
-
-        {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
-
-        <button type="submit" className="primary-button" disabled={isSubmitting}>
-          {isSubmitting ? 'Working...' : mode === 'login' ? 'Sign in' : 'Create account'}
-        </button>
-      </form>
+      <button type="button" className="primary-button" disabled={isSubmitting} onClick={handleConnectWallet}>
+        {isSubmitting ? 'Connecting...' : 'Connect Wallet'}
+      </button>
     </article>
   );
 };

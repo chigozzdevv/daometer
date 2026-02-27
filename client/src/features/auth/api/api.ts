@@ -5,30 +5,29 @@ type AuthApiResponse = {
   refreshToken: string;
   user: {
     id: string;
-    fullName: string;
-    email: string;
+    walletAddress: string;
+    displayName: string | null;
+    roles: string[];
   };
 };
 
-type LoginInput = {
-  email: string;
-  password: string;
+export type WalletChallengeResponse = {
+  walletAddress: string;
+  message: string;
+  expiresAt: string;
 };
 
-type RegisterInput = {
-  fullName: string;
-  email: string;
-  password: string;
-};
-
-export const loginRequest = async (input: LoginInput): Promise<AuthApiResponse> =>
-  apiRequest<AuthApiResponse>('/auth/login', {
+export const createWalletChallengeRequest = async (walletAddress: string): Promise<WalletChallengeResponse> =>
+  apiRequest<WalletChallengeResponse>('/auth/challenge', {
     method: 'POST',
-    body: input,
+    body: { walletAddress },
   });
 
-export const registerRequest = async (input: RegisterInput): Promise<AuthApiResponse> =>
-  apiRequest<AuthApiResponse>('/auth/register', {
+export const verifyWalletChallengeRequest = async (input: {
+  walletAddress: string;
+  signatureBase64: string;
+}): Promise<AuthApiResponse> =>
+  apiRequest<AuthApiResponse>('/auth/verify', {
     method: 'POST',
     body: input,
   });
