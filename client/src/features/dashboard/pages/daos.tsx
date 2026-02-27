@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { Transaction, VersionedTransaction } from '@solana/web3.js';
 import { useAuth } from '@/app/providers/auth-provider';
 import {
   createDao,
@@ -73,6 +74,16 @@ const bytesToBase64 = (value: Uint8Array): string => {
   return window.btoa(binary);
 };
 
+const deserializePreparedTransaction = (transactionBase64: string): Transaction | VersionedTransaction => {
+  const transactionBytes = base64ToBytes(transactionBase64);
+
+  try {
+    return Transaction.from(transactionBytes);
+  } catch {
+    return VersionedTransaction.deserialize(transactionBytes);
+  }
+};
+
 const extractSignature = (result: unknown): string | null => {
   if (typeof result === 'string' && result.trim().length > 0) {
     return result;
@@ -103,6 +114,48 @@ const sendPreparedTransaction = async (
   const isPhantomProvider =
     typeof window !== 'undefined' &&
     ((window as unknown as { phantom?: { solana?: SolanaProvider } }).phantom?.solana === provider);
+  const preparedTransaction = deserializePreparedTransaction(transactionBase64);
+
+  if (typeof provider.signAndSendTransaction === 'function') {
+    const directVariants: Array<{ label: string; payload: unknown; options?: Record<string, unknown> }> = [
+      {
+        label: 'signAndSend(transaction-object)',
+        payload: preparedTransaction,
+        options: {
+          preflightCommitment: 'confirmed',
+        },
+      },
+      {
+        label: 'signAndSend(transaction-object-no-options)',
+        payload: preparedTransaction,
+      },
+      {
+        label: 'signAndSend(bytes)',
+        payload: base64ToBytes(transactionBase64),
+        options: {
+          preflightCommitment: 'confirmed',
+        },
+      },
+      { label: 'signAndSend(base58-string)', payload: transactionBase58 },
+      { label: 'signAndSend(base64-string)', payload: transactionBase64 },
+      { label: 'signAndSend(message-object)', payload: { message: transactionMessage } },
+    ];
+
+    for (const variant of directVariants) {
+      try {
+        const result = await provider.signAndSendTransaction(variant.payload, variant.options);
+        const signature = extractSignature(result);
+
+        if (signature) {
+          return signature;
+        }
+      } catch (error) {
+        errors.push(
+          `${variant.label}: ${error instanceof Error ? error.message : 'unknown signAndSendTransaction error'}`,
+        );
+      }
+    }
+  }
 
   if (typeof provider.request === 'function') {
     const requestVariants: Array<{ label: string; params: unknown }> = isPhantomProvider
@@ -163,33 +216,6 @@ const sendPreparedTransaction = async (
       } catch (error) {
         errors.push(
           `${variant.label}: ${error instanceof Error ? error.message : 'unknown provider.request error'}`,
-        );
-      }
-    }
-  }
-
-  if (typeof provider.signAndSendTransaction === 'function') {
-    const transactionBytes = base64ToBytes(transactionBase64);
-    const directVariants: Array<{ label: string; payload: unknown }> = [
-      { label: 'signAndSend(bytes)', payload: transactionBytes },
-      { label: 'signAndSend(base58-string)', payload: transactionBase58 },
-      { label: 'signAndSend(base64-string)', payload: transactionBase64 },
-      { label: 'signAndSend(message-object)', payload: { message: transactionMessage } },
-    ];
-
-    for (const variant of directVariants) {
-      try {
-        const result = await provider.signAndSendTransaction(variant.payload, {
-          preflightCommitment: 'confirmed',
-        });
-        const signature = extractSignature(result);
-
-        if (signature) {
-          return signature;
-        }
-      } catch (error) {
-        errors.push(
-          `${variant.label}: ${error instanceof Error ? error.message : 'unknown signAndSendTransaction error'}`,
         );
       }
     }
