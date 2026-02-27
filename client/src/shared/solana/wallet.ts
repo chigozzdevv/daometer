@@ -1,4 +1,4 @@
-import { Transaction, VersionedTransaction } from '@solana/web3.js';
+import { Connection, Transaction, VersionedTransaction } from '@solana/web3.js';
 
 export type SolanaProviderConnectResult = {
   publicKey?: {
@@ -15,6 +15,7 @@ export type SolanaProvider = {
     transaction: Uint8Array | unknown,
     options?: Record<string, unknown>,
   ) => Promise<unknown>;
+  signTransaction?: (transaction: Transaction | VersionedTransaction) => Promise<unknown>;
   request?: (request: { method: string; params?: unknown }) => Promise<unknown>;
 };
 
@@ -69,6 +70,44 @@ const deserializePreparedTransaction = (transactionBase64: string): Transaction 
   }
 };
 
+const serializeSignedTransaction = (
+  signedTransaction: unknown,
+  fallback: Transaction | VersionedTransaction,
+): Uint8Array => {
+  if (signedTransaction instanceof Transaction) {
+    return signedTransaction.serialize();
+  }
+
+  if (signedTransaction instanceof VersionedTransaction) {
+    return signedTransaction.serialize();
+  }
+
+  if (signedTransaction instanceof Uint8Array) {
+    return signedTransaction;
+  }
+
+  if (signedTransaction && typeof signedTransaction === 'object') {
+    const maybeSerialize = (signedTransaction as { serialize?: () => Uint8Array | ArrayLike<number> }).serialize;
+
+    if (typeof maybeSerialize === 'function') {
+      const serialized = maybeSerialize.call(signedTransaction);
+      return serialized instanceof Uint8Array ? serialized : new Uint8Array(serialized);
+    }
+  }
+
+  if (fallback instanceof Transaction) {
+    return fallback.serialize();
+  }
+
+  return fallback.serialize();
+};
+
+type SendPreparedTransactionOptions = {
+  rpcUrl?: string;
+  recentBlockhash?: string;
+  lastValidBlockHeight?: number;
+};
+
 const extractSignature = (result: unknown): string | null => {
   if (typeof result === 'string' && result.trim().length > 0) {
     return result;
@@ -94,25 +133,27 @@ export const sendPreparedTransaction = async (
   transactionMessage: string,
   transactionBase58: string,
   transactionBase64: string,
+  options: SendPreparedTransactionOptions = {},
 ): Promise<string> => {
   const errors: string[] = [];
   const isPhantomProvider =
     typeof window !== 'undefined' &&
     ((window as unknown as { phantom?: { solana?: SolanaProvider } }).phantom?.solana === provider);
-  const preparedTransaction = deserializePreparedTransaction(transactionBase64);
+  const buildPreparedTransaction = (): Transaction | VersionedTransaction =>
+    deserializePreparedTransaction(transactionBase64);
 
   if (typeof provider.signAndSendTransaction === 'function') {
     const directVariants: Array<{ label: string; payload: unknown; options?: Record<string, unknown> }> = [
       {
         label: 'signAndSend(transaction-object)',
-        payload: preparedTransaction,
+        payload: buildPreparedTransaction(),
         options: {
           preflightCommitment: 'confirmed',
         },
       },
       {
         label: 'signAndSend(transaction-object-no-options)',
-        payload: preparedTransaction,
+        payload: buildPreparedTransaction(),
       },
     ];
 
@@ -147,7 +188,37 @@ export const sendPreparedTransaction = async (
     }
   }
 
-  if (typeof provider.request === 'function' && !isPhantomProvider) {
+  if (typeof provider.signTransaction === 'function' && options.rpcUrl) {
+    try {
+      const transactionForSigning = buildPreparedTransaction();
+      const signedTransaction = await provider.signTransaction(transactionForSigning);
+      const serialized = serializeSignedTransaction(signedTransaction, transactionForSigning);
+      const connection = new Connection(options.rpcUrl, 'confirmed');
+      const signature = await connection.sendRawTransaction(serialized, {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+      });
+
+      if (options.recentBlockhash && typeof options.lastValidBlockHeight === 'number') {
+        await connection.confirmTransaction(
+          {
+            signature,
+            blockhash: options.recentBlockhash,
+            lastValidBlockHeight: options.lastValidBlockHeight,
+          },
+          'confirmed',
+        );
+      }
+
+      return signature;
+    } catch (error) {
+      errors.push(
+        `signTransaction+sendRawTransaction: ${error instanceof Error ? error.message : 'unknown signTransaction error'}`,
+      );
+    }
+  }
+
+  if (typeof provider.request === 'function') {
     const requestVariants: Array<{ label: string; params: unknown }> = [
       { label: 'request(transaction-base58-string)', params: transactionBase58 },
       { label: 'request([transaction-base58-string])', params: [transactionBase58] },
@@ -165,6 +236,16 @@ export const sendPreparedTransaction = async (
         label: 'request(message-object)',
         params: {
           message: transactionMessage,
+          options: {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed',
+          },
+        },
+      },
+      {
+        label: 'request(message-base58-transaction-object)',
+        params: {
+          message: transactionBase58,
           options: {
             skipPreflight: false,
             preflightCommitment: 'confirmed',

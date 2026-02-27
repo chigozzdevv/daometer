@@ -15,6 +15,10 @@ import { getSolanaProvider, sendPreparedTransaction } from '@/shared/solana/wall
 
 const getRealmDetailUrl = (realmAddress: string, network: 'mainnet-beta' | 'devnet'): string =>
   `https://app.realms.today/dao/${realmAddress}${network === 'devnet' ? '?cluster=devnet' : ''}`;
+const defaultRpcByNetwork: Record<'mainnet-beta' | 'devnet', string> = {
+  'mainnet-beta': 'https://api.mainnet-beta.solana.com',
+  devnet: 'https://api.devnet.solana.com',
+};
 
 const shortAddress = (value: string): string => `${value.slice(0, 6)}...${value.slice(-6)}`;
 
@@ -273,7 +277,10 @@ export const DashboardProposalsPage = (): JSX.Element => {
                                 throw new Error('Wallet connection failed. Try reconnecting your wallet.');
                               }
 
-                              const prepared = await prepareProposalOnchainExecution(proposal.id, session.accessToken);
+                              const prepared = await prepareProposalOnchainExecution(proposal.id, session.accessToken, {
+                                rpcUrl: selectedDao ? defaultRpcByNetwork[selectedDao.network] : undefined,
+                              });
+                              const rpcUrl = selectedDao ? defaultRpcByNetwork[selectedDao.network] : undefined;
 
                               for (const tx of prepared.preparedTransactions) {
                                 await sendPreparedTransaction(
@@ -281,6 +288,11 @@ export const DashboardProposalsPage = (): JSX.Element => {
                                   tx.transactionMessage,
                                   tx.transactionBase58,
                                   tx.transactionBase64,
+                                  {
+                                    rpcUrl,
+                                    recentBlockhash: tx.recentBlockhash,
+                                    lastValidBlockHeight: tx.lastValidBlockHeight,
+                                  },
                                 );
                               }
 

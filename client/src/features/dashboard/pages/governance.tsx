@@ -123,6 +123,9 @@ export const DashboardGovernancePage = (): JSX.Element => {
       transactionMessage: string;
       transactionBase58: string;
       transactionBase64: string;
+      rpcUrl?: string;
+      recentBlockhash?: string;
+      lastValidBlockHeight?: number;
     }) => Promise<string>;
   }> => {
     const provider = getSolanaProvider();
@@ -141,7 +144,11 @@ export const DashboardGovernancePage = (): JSX.Element => {
     return {
       walletAddress,
       send: async (tx) =>
-        sendPreparedTransaction(provider, tx.transactionMessage, tx.transactionBase58, tx.transactionBase64),
+        sendPreparedTransaction(provider, tx.transactionMessage, tx.transactionBase58, tx.transactionBase64, {
+          rpcUrl: tx.rpcUrl,
+          recentBlockhash: tx.recentBlockhash,
+          lastValidBlockHeight: tx.lastValidBlockHeight,
+        }),
     };
   };
 

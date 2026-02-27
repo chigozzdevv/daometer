@@ -877,6 +877,11 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
             prepared.transactionMessage,
             prepared.transactionBase58,
             prepared.transactionBase64,
+            {
+              rpcUrl: result.onchainPreparation.onchainExecution.rpcUrl,
+              recentBlockhash: prepared.recentBlockhash,
+              lastValidBlockHeight: prepared.lastValidBlockHeight,
+            },
           );
           onchainSignatures.push(signature);
         }

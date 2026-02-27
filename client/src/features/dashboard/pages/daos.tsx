@@ -329,6 +329,11 @@ export const DashboardDaosPage = (): JSX.Element => {
         prepared.transactionMessage,
         prepared.transactionBase58,
         prepared.transactionBase64,
+        {
+          rpcUrl: prepared.rpcUrl,
+          recentBlockhash: prepared.recentBlockhash,
+          lastValidBlockHeight: prepared.lastValidBlockHeight,
+        },
       );
 
       setGovernanceCreateSuccessByDao((current) => ({
@@ -510,6 +515,11 @@ export const DashboardDaosPage = (): JSX.Element => {
         prepared.transactionMessage,
         prepared.transactionBase58,
         prepared.transactionBase64,
+        {
+          rpcUrl: prepared.rpcUrl,
+          recentBlockhash: prepared.recentBlockhash,
+          lastValidBlockHeight: prepared.lastValidBlockHeight,
+        },
       );
       const createdDao = await createDao(
         {
@@ -561,6 +571,11 @@ export const DashboardDaosPage = (): JSX.Element => {
           governancePrepared.transactionMessage,
           governancePrepared.transactionBase58,
           governancePrepared.transactionBase64,
+          {
+            rpcUrl: governancePrepared.rpcUrl,
+            recentBlockhash: governancePrepared.recentBlockhash,
+            lastValidBlockHeight: governancePrepared.lastValidBlockHeight,
+          },
         );
 
         finalDao = await updateDao(
@@ -688,6 +703,11 @@ export const DashboardDaosPage = (): JSX.Element => {
         prepared.transactionMessage,
         prepared.transactionBase58,
         prepared.transactionBase64,
+        {
+          rpcUrl: prepared.rpcUrl,
+          recentBlockhash: prepared.recentBlockhash,
+          lastValidBlockHeight: prepared.lastValidBlockHeight,
+        },
       );
 
       setOnchainAuthorityWallet(prepared.authorityWallet);
