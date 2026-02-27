@@ -15,8 +15,6 @@ import {
 } from '@/features/proposal/proposal.service';
 import { AppError } from '@/shared/errors/app-error';
 
-const NON_CUSTODIAL_EXECUTION_REQUIRED = 'NON_CUSTODIAL_EXECUTION_REQUIRED';
-
 type QueueSyncResult = {
   candidateCount: number;
   scheduledCount: number;
@@ -236,7 +234,7 @@ export const processNextExecutionJob = async (workerId: string): Promise<Process
 
     await failExecutionJobPermanently(
       executionJob._id,
-      NON_CUSTODIAL_EXECUTION_REQUIRED,
+      'Wallet execution required: execute this proposal from the Proposals page.',
       workerId,
     );
 
