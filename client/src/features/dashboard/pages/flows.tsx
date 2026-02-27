@@ -105,7 +105,7 @@ export const DashboardFlowsPage = (): JSX.Element => {
     }
 
     if (detailsName.trim().length < 3) {
-      setError('Project name must be at least 3 characters.');
+      setError('Flow name must be at least 3 characters.');
       return;
     }
 
@@ -208,14 +208,13 @@ export const DashboardFlowsPage = (): JSX.Element => {
             <span className="flow-step-index">Step 1</span>
             <div>
               <h2>Flow Details</h2>
-              <p>Select DAO, enter project name and description, then continue.</p>
             </div>
           </header>
 
           <DaoSelect daos={daos} selectedDaoId={detailsDaoId || null} onSelect={setDetailsDaoId} label="DAO" />
 
           <label className="input-label">
-            Project name
+            Flow name
             <input
               className="text-input"
               value={detailsName}
