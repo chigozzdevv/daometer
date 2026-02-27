@@ -4,7 +4,7 @@ import { createFlow, getDaos, getFlows, type DaoItem, type FlowGraph, type FlowI
 import { FlowEditor } from '@/features/dashboard/components/flow-editor';
 import { DashboardShell } from '@/features/dashboard/components/shell';
 import { DaoSelect } from '@/features/dashboard/components/dao-select';
-import { EmptyState, ErrorState, LoadingState } from '@/features/dashboard/components/state';
+import { ErrorState, LoadingState } from '@/features/dashboard/components/state';
 
 const makeBlockId = (): string => `block-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -199,9 +199,7 @@ export const DashboardFlowsPage = (): JSX.Element => {
                 </button>
               </div>
             </div>
-          ) : (
-            <EmptyState message="No flows yet. Create your first flow." />
-          )}
+          ) : null}
         </article>
       ) : null}
 
