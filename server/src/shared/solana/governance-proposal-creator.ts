@@ -29,6 +29,10 @@ import { env } from '@/config/env.config';
 import { SOLANA_PROGRAM_IDS } from '@/config/solana.config';
 import type { ProposalInstruction } from '@/features/proposal/proposal.model';
 import { AppError } from '@/shared/errors/app-error';
+import {
+  prepareUnsignedTransaction,
+  type PreparedTransactionEnvelope,
+} from '@/shared/solana/prepared-transaction.util';
 import { getEnvSigner } from '@/shared/solana/solana-signer.util';
 
 type CreateOnchainProposalFromStoredInput = {
@@ -52,6 +56,31 @@ type CreateOnchainProposalFromStoredResult = {
   tokenOwnerRecordAddress: string;
   transactionAddresses: string[];
   signatures: string[];
+};
+
+type PrepareOnchainProposalFromStoredInput = {
+  governanceProgramId: string;
+  programVersion: number;
+  realmAddress: string;
+  governanceAddress: string;
+  governingTokenMint: string;
+  proposalName: string;
+  descriptionLink: string;
+  holdUpSeconds: number;
+  instructions: ProposalInstruction[];
+  authorityWallet: string;
+  payerWallet?: string;
+  optionIndex?: number;
+  useDenyOption?: boolean;
+  rpcUrl?: string;
+  signOff?: boolean;
+};
+
+type PrepareOnchainProposalFromStoredResult = {
+  proposalAddress: string;
+  tokenOwnerRecordAddress: string;
+  transactionAddresses: string[];
+  preparedTransactions: PreparedTransactionEnvelope[];
 };
 
 const sendInstructionBatch = async (
@@ -597,5 +626,160 @@ export const createOnchainProposalFromStoredInstructions = async (
     tokenOwnerRecordAddress: tokenOwnerRecordAddress.toBase58(),
     transactionAddresses,
     signatures,
+  };
+};
+
+export const prepareOnchainProposalFromStoredInstructions = async (
+  input: PrepareOnchainProposalFromStoredInput,
+): Promise<PrepareOnchainProposalFromStoredResult> => {
+  const connection = new Connection(input.rpcUrl ?? env.SOLANA_RPC_URL, {
+    commitment: env.SOLANA_COMMITMENT as Commitment,
+  });
+
+  const governanceProgramId = new PublicKey(input.governanceProgramId);
+  const realmAddress = new PublicKey(input.realmAddress);
+  const governanceAddress = new PublicKey(input.governanceAddress);
+  const governingTokenMint = new PublicKey(input.governingTokenMint);
+  const authorityWallet = new PublicKey(input.authorityWallet);
+  const payerWallet = input.payerWallet ? new PublicKey(input.payerWallet) : authorityWallet;
+  const optionIndex = input.optionIndex ?? 0;
+  const useDenyOption = input.useDenyOption ?? true;
+  const nativeTreasuryAddress = await getNativeTreasuryAddress(governanceProgramId, governanceAddress);
+
+  const preparedTransactions: PreparedTransactionEnvelope[] = [];
+  const transactionAddresses: string[] = [];
+
+  const tokenOwnerRecordAddress = await getTokenOwnerRecordAddress(
+    governanceProgramId,
+    realmAddress,
+    governingTokenMint,
+    authorityWallet,
+  );
+
+  const tokenOwnerRecordInfo = await connection.getAccountInfo(tokenOwnerRecordAddress, env.SOLANA_COMMITMENT as Commitment);
+
+  if (!tokenOwnerRecordInfo) {
+    const createTorInstructions: TransactionInstruction[] = [];
+
+    await withCreateTokenOwnerRecord(
+      createTorInstructions,
+      governanceProgramId,
+      input.programVersion,
+      realmAddress,
+      authorityWallet,
+      governingTokenMint,
+      payerWallet,
+    );
+
+    preparedTransactions.push(
+      await prepareUnsignedTransaction({
+        connection,
+        instructions: createTorInstructions,
+        feePayer: payerWallet,
+        label: 'create-token-owner-record',
+      }),
+    );
+  }
+
+  const createProposalInstructions: TransactionInstruction[] = [];
+
+  const proposalAddress = await withCreateProposal(
+    createProposalInstructions,
+    governanceProgramId,
+    input.programVersion,
+    realmAddress,
+    governanceAddress,
+    tokenOwnerRecordAddress,
+    input.proposalName,
+    input.descriptionLink,
+    governingTokenMint,
+    authorityWallet,
+    undefined,
+    VoteType.SINGLE_CHOICE,
+    ['Approve'],
+    useDenyOption,
+    payerWallet,
+    undefined,
+    undefined,
+  );
+
+  preparedTransactions.push(
+    await prepareUnsignedTransaction({
+      connection,
+      instructions: createProposalInstructions,
+      feePayer: payerWallet,
+      label: 'create-proposal',
+    }),
+  );
+
+  for (let index = 0; index < input.instructions.length; index += 1) {
+    const instruction = input.instructions[index];
+    const runtimeInstruction = await toRuntimeInstruction(instruction, {
+      connection,
+      governanceProgramId,
+      governanceAddress,
+      programVersion: input.programVersion,
+      expectedNativeTreasuryAddress: nativeTreasuryAddress,
+    });
+    const governanceInstructionData = createInstructionData(runtimeInstruction);
+
+    const insertInstructions: TransactionInstruction[] = [];
+
+    const proposalTransactionAddress = await withInsertTransaction(
+      insertInstructions,
+      governanceProgramId,
+      input.programVersion,
+      governanceAddress,
+      proposalAddress,
+      tokenOwnerRecordAddress,
+      authorityWallet,
+      index,
+      optionIndex,
+      input.holdUpSeconds,
+      [governanceInstructionData],
+      payerWallet,
+    );
+
+    preparedTransactions.push(
+      await prepareUnsignedTransaction({
+        connection,
+        instructions: insertInstructions,
+        feePayer: payerWallet,
+        label: `insert-transaction-${index}`,
+      }),
+    );
+    transactionAddresses.push(proposalTransactionAddress.toBase58());
+  }
+
+  if (input.signOff ?? true) {
+    const signOffInstructions: TransactionInstruction[] = [];
+
+    withSignOffProposal(
+      signOffInstructions,
+      governanceProgramId,
+      input.programVersion,
+      realmAddress,
+      governanceAddress,
+      proposalAddress,
+      authorityWallet,
+      undefined,
+      tokenOwnerRecordAddress,
+    );
+
+    preparedTransactions.push(
+      await prepareUnsignedTransaction({
+        connection,
+        instructions: signOffInstructions,
+        feePayer: payerWallet,
+        label: 'sign-off-proposal',
+      }),
+    );
+  }
+
+  return {
+    proposalAddress: proposalAddress.toBase58(),
+    tokenOwnerRecordAddress: tokenOwnerRecordAddress.toBase58(),
+    transactionAddresses,
+    preparedTransactions,
   };
 };

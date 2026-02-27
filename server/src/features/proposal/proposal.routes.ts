@@ -4,6 +4,8 @@ import {
   decideProposalManualApprovalSchema,
   getProposalSchema,
   listProposalSchema,
+  prepareProposalOnchainCreateSchema,
+  prepareProposalOnchainExecutionSchema,
   syncProposalOnchainExecutionSchema,
   transitionProposalStateSchema,
   updateProposalOnchainExecutionSchema,
@@ -32,6 +34,18 @@ proposalRouter.post(
   requireAuth,
   validateRequest(syncProposalOnchainExecutionSchema),
   proposalController.syncOnchainExecution,
+);
+proposalRouter.post(
+  '/:proposalId/prepare-onchain-create',
+  requireAuth,
+  validateRequest(prepareProposalOnchainCreateSchema),
+  proposalController.prepareOnchainCreate,
+);
+proposalRouter.post(
+  '/:proposalId/prepare-onchain-execution',
+  requireAuth,
+  validateRequest(prepareProposalOnchainExecutionSchema),
+  proposalController.prepareOnchainExecution,
 );
 proposalRouter.post(
   '/:proposalId/manual-approval',

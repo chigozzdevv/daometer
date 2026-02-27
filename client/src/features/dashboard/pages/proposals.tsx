@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useAuth } from '@/app/providers/auth-provider';
 import {
   getDaoProposals,
   getDaos,
+  prepareProposalOnchainExecution,
   type DaoItem,
   type ProposalItem,
 } from '@/features/dashboard/api/api';
@@ -9,6 +11,7 @@ import { DaoSelect } from '@/features/dashboard/components/dao-select';
 import { DashboardShell } from '@/features/dashboard/components/shell';
 import { ErrorState, LoadingState } from '@/features/dashboard/components/state';
 import { formatDateTime } from '@/features/dashboard/lib/format';
+import { getSolanaProvider, sendPreparedTransaction } from '@/shared/solana/wallet';
 
 const getRealmDetailUrl = (realmAddress: string, network: 'mainnet-beta' | 'devnet'): string =>
   `https://app.realms.today/dao/${realmAddress}${network === 'devnet' ? '?cluster=devnet' : ''}`;
@@ -41,6 +44,7 @@ const approvalChip = (required: boolean, approved: boolean | null): JSX.Element 
 };
 
 export const DashboardProposalsPage = (): JSX.Element => {
+  const { session } = useAuth();
   const [daos, setDaos] = useState<DaoItem[]>([]);
   const [selectedDaoId, setSelectedDaoId] = useState<string | null>(null);
   const [proposals, setProposals] = useState<ProposalItem[]>([]);
@@ -48,6 +52,7 @@ export const DashboardProposalsPage = (): JSX.Element => {
   const [isLoadingProposals, setIsLoadingProposals] = useState(true);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [executingProposalId, setExecutingProposalId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const selectedDao = useMemo(
@@ -211,6 +216,7 @@ export const DashboardProposalsPage = (): JSX.Element => {
                 <th>Voting ends</th>
                 <th>Onchain</th>
                 <th>Manual approval</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -237,6 +243,67 @@ export const DashboardProposalsPage = (): JSX.Element => {
                     </span>
                   </td>
                   <td>{approvalChip(proposal.manualApproval.required, proposal.manualApproval.approved)}</td>
+                  <td>
+                    {proposal.onchainExecution.enabled && proposal.state === 'succeeded' ? (
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={executingProposalId === proposal.id || !session?.accessToken}
+                        onClick={() => {
+                          if (!session?.accessToken) {
+                            setError('Connect wallet to execute on-chain transactions.');
+                            return;
+                          }
+
+                          const run = async (): Promise<void> => {
+                            setError(null);
+                            setExecutingProposalId(proposal.id);
+
+                            try {
+                              const provider = getSolanaProvider();
+
+                              if (!provider) {
+                                throw new Error('No Solana wallet detected. Install Phantom or another wallet extension.');
+                              }
+
+                              const connectResult = await provider.connect();
+                              const connectedWallet = connectResult.publicKey?.toBase58() ?? provider.publicKey?.toBase58();
+
+                              if (!connectedWallet) {
+                                throw new Error('Wallet connection failed. Try reconnecting your wallet.');
+                              }
+
+                              const prepared = await prepareProposalOnchainExecution(proposal.id, session.accessToken);
+
+                              for (const tx of prepared.preparedTransactions) {
+                                await sendPreparedTransaction(
+                                  provider,
+                                  tx.transactionMessage,
+                                  tx.transactionBase58,
+                                  tx.transactionBase64,
+                                );
+                              }
+
+                              if (selectedDaoId) {
+                                const refreshed = await getDaoProposals(selectedDaoId, { limit: 100 });
+                                setProposals(refreshed);
+                              }
+                            } catch (executeError) {
+                              setError(executeError instanceof Error ? executeError.message : 'Unable to execute proposal');
+                            } finally {
+                              setExecutingProposalId(null);
+                            }
+                          };
+
+                          void run();
+                        }}
+                      >
+                        {executingProposalId === proposal.id ? 'Executing...' : 'Execute with Wallet'}
+                      </button>
+                    ) : (
+                      <span className="status-chip status-chip--gray">N/A</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

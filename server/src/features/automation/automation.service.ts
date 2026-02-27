@@ -11,11 +11,11 @@ import {
 import {
   findAutoExecutionCandidates,
   getProposalById,
-  markProposalExecuted,
   markProposalExecutionFailed,
 } from '@/features/proposal/proposal.service';
 import { AppError } from '@/shared/errors/app-error';
-import { executeGovernanceProposalTransactions } from '@/shared/solana/governance-executor';
+
+const NON_CUSTODIAL_EXECUTION_REQUIRED = 'NON_CUSTODIAL_EXECUTION_REQUIRED';
 
 type QueueSyncResult = {
   candidateCount: number;
@@ -234,30 +234,15 @@ export const processNextExecutionJob = async (workerId: string): Promise<Process
       };
     }
 
-    await heartbeat();
-
-    const executionResult = await executeGovernanceProposalTransactions({
-      governanceProgramId: proposal.onchainExecution.governanceProgramId,
-      programVersion: proposal.onchainExecution.programVersion,
-      governanceAddress: proposal.onchainExecution.governanceAddress,
-      proposalAddress: proposal.onchainExecution.proposalAddress,
-      transactionAddresses: proposal.onchainExecution.transactionAddresses,
-      rpcUrl: proposal.onchainExecution.rpcUrl,
-      requireSimulation: proposal.onchainExecution.requireSimulation,
-      onBeforeTransaction: heartbeat,
-    });
-
-    const executionReference =
-      executionResult.signatures.length > 0
-        ? executionResult.signatures.join(',')
-        : `skipped:${executionResult.skippedTransactionAddresses.join(',')}`;
-
-    await markProposalExecuted(proposal._id, executionReference);
-    await completeExecutionJob(executionJob._id, executionReference, workerId);
+    await failExecutionJobPermanently(
+      executionJob._id,
+      NON_CUSTODIAL_EXECUTION_REQUIRED,
+      workerId,
+    );
 
     return {
       processed: true,
-      status: 'completed',
+      status: 'skipped',
       executionJobId: executionJob.id,
     };
   } catch (error) {

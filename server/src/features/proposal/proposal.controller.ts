@@ -7,6 +7,8 @@ import {
   decideProposalManualApproval,
   getProposalById,
   listDaoProposals,
+  prepareProposalOnchainCreate,
+  prepareProposalOnchainExecution,
   syncProposalOnchainExecution,
   transitionProposalState,
   updateProposalOnchainExecution,
@@ -98,6 +100,34 @@ export const createOnchain = asyncHandler(async (req: Request, res: Response) =>
   const result = await createProposalOnchain(proposalId, req.body, req.authUser.userId);
 
   res.status(201).json({
+    success: true,
+    data: result,
+  });
+});
+
+export const prepareOnchainCreate = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.authUser) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const { proposalId } = req.params as { proposalId: string };
+  const result = await prepareProposalOnchainCreate(proposalId, req.body, req.authUser.userId);
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+export const prepareOnchainExecution = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.authUser) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const { proposalId } = req.params as { proposalId: string };
+  const result = await prepareProposalOnchainExecution(proposalId, req.body, req.authUser.userId);
+
+  res.status(200).json({
     success: true,
     data: result,
   });

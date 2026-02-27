@@ -15,6 +15,10 @@ import {
 } from '@solana/web3.js';
 import { env } from '@/config/env.config';
 import { AppError } from '@/shared/errors/app-error';
+import {
+  prepareUnsignedTransaction,
+  type PreparedTransactionEnvelope,
+} from '@/shared/solana/prepared-transaction.util';
 import { getEnvSigner } from '@/shared/solana/solana-signer.util';
 
 type ExecuteGovernanceProposalInput = {
@@ -30,6 +34,21 @@ type ExecuteGovernanceProposalInput = {
 
 type ExecuteGovernanceProposalResult = {
   signatures: string[];
+  skippedTransactionAddresses: string[];
+};
+
+type PrepareGovernanceProposalExecutionInput = {
+  governanceProgramId: string;
+  programVersion: number;
+  governanceAddress: string;
+  proposalAddress: string;
+  transactionAddresses: string[];
+  feePayerWallet: string;
+  rpcUrl?: string | null;
+};
+
+type PrepareGovernanceProposalExecutionResult = {
+  preparedTransactions: PreparedTransactionEnvelope[];
   skippedTransactionAddresses: string[];
 };
 
@@ -119,6 +138,67 @@ export const executeGovernanceProposalTransactions = async (
 
   return {
     signatures,
+    skippedTransactionAddresses,
+  };
+};
+
+export const prepareGovernanceProposalExecutionTransactions = async (
+  input: PrepareGovernanceProposalExecutionInput,
+): Promise<PrepareGovernanceProposalExecutionResult> => {
+  if (input.transactionAddresses.length === 0) {
+    throw new AppError('No transaction addresses configured for onchain execution', 400, 'ONCHAIN_TX_MISSING');
+  }
+
+  const connection = new Connection(input.rpcUrl ?? env.SOLANA_RPC_URL, {
+    commitment: env.SOLANA_COMMITMENT as Commitment,
+  });
+  const governanceProgramId = new PublicKey(input.governanceProgramId);
+  const governanceAddress = new PublicKey(input.governanceAddress);
+  const proposalAddress = new PublicKey(input.proposalAddress);
+  const feePayer = new PublicKey(input.feePayerWallet);
+
+  const preparedTransactions: PreparedTransactionEnvelope[] = [];
+  const skippedTransactionAddresses: string[] = [];
+
+  for (const transactionAddressText of input.transactionAddresses) {
+    const transactionAddress = new PublicKey(transactionAddressText);
+
+    const proposalTransactionAccount = await getGovernanceAccount(
+      connection,
+      transactionAddress,
+      ProposalTransaction,
+    );
+
+    if (proposalTransactionAccount.account.executionStatus === InstructionExecutionStatus.Success) {
+      skippedTransactionAddresses.push(transactionAddressText);
+      continue;
+    }
+
+    const governanceInstructions = proposalTransactionAccount.account.getAllInstructions();
+    const executeInstructions: TransactionInstruction[] = [];
+
+    await withExecuteTransaction(
+      executeInstructions,
+      governanceProgramId,
+      input.programVersion,
+      governanceAddress,
+      proposalAddress,
+      transactionAddress,
+      governanceInstructions,
+    );
+
+    preparedTransactions.push(
+      await prepareUnsignedTransaction({
+        connection,
+        instructions: executeInstructions,
+        feePayer,
+        label: `execute-${transactionAddress.toBase58().slice(0, 8)}`,
+      }),
+    );
+  }
+
+  return {
+    preparedTransactions,
     skippedTransactionAddresses,
   };
 };

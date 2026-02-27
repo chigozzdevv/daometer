@@ -4,7 +4,7 @@ import { FlowModel, type FlowDocument } from '@/features/flow/flow.model';
 import type { FlowBlock, FlowCompileContext, FlowGraph, FlowProposalDefaults } from '@/features/flow/flow.types';
 import { DaoModel } from '@/features/dao/dao.model';
 import { listDaoGovernances } from '@/features/dao/dao.service';
-import { createProposal, createProposalOnchain, type CreateProposalInput } from '@/features/proposal/proposal.service';
+import { createProposal, prepareProposalOnchainCreate, type CreateProposalInput } from '@/features/proposal/proposal.service';
 import { AppError } from '@/shared/errors/app-error';
 import { assertCanManageDao } from '@/shared/utils/authorization.util';
 import { generateBase58String } from '@/shared/utils/base58.util';
@@ -329,12 +329,28 @@ export const publishFlow = async (
   flow: FlowDocument;
   proposalId: string;
   compilation: ReturnType<typeof compileFlowBlocks>;
-  onchainCreation?: {
-    signatures: string[];
-    onchainProposalAddress: string | null;
-    onchainTransactionAddresses: string[];
+  onchainPreparation?: {
+    proposalAddress: string;
+    transactionAddresses: string[];
+    preparedTransactions: Array<{
+      label: string;
+      transactionMessage: string;
+      transactionBase58: string;
+      transactionBase64: string;
+      recentBlockhash: string;
+      lastValidBlockHeight: number;
+    }>;
+    onchainExecution: {
+      enabled: true;
+      governanceProgramId: string;
+      programVersion: number;
+      governanceAddress: string;
+      proposalAddress: string;
+      transactionAddresses: string[];
+      rpcUrl?: string;
+      requireSimulation: boolean;
+    };
   };
-  onchainCreationError?: string;
 }> => {
   const flow = await getFlowById(flowId);
   assertFlowOwner(flow, userId);
@@ -352,12 +368,13 @@ export const publishFlow = async (
 
   if (
     resolvedOnchainCreate?.enabled &&
-    (!resolvedOnchainCreate.realmAddress ||
+    (!resolvedOnchainCreate.governanceProgramId ||
+      !resolvedOnchainCreate.realmAddress ||
       !resolvedOnchainCreate.governanceAddress ||
       !resolvedOnchainCreate.governingTokenMint)
   ) {
     throw new AppError(
-      'realmAddress, governanceAddress and governingTokenMint are required for onchainCreate',
+      'governanceProgramId, realmAddress, governanceAddress and governingTokenMint are required for onchainCreate',
       400,
       'FLOW_ONCHAIN_CREATE_CONFIG_INVALID',
     );
@@ -402,18 +419,35 @@ export const publishFlow = async (
   };
 
   const proposal = await createProposal(proposalInput, userId);
-  let onchainCreation:
+  let onchainPreparation:
     | {
-        signatures: string[];
-        onchainProposalAddress: string | null;
-        onchainTransactionAddresses: string[];
+        proposalAddress: string;
+        transactionAddresses: string[];
+        preparedTransactions: Array<{
+          label: string;
+          transactionMessage: string;
+          transactionBase58: string;
+          transactionBase64: string;
+          recentBlockhash: string;
+          lastValidBlockHeight: number;
+        }>;
+        onchainExecution: {
+          enabled: true;
+          governanceProgramId: string;
+          programVersion: number;
+          governanceAddress: string;
+          proposalAddress: string;
+          transactionAddresses: string[];
+          rpcUrl?: string;
+          requireSimulation: boolean;
+        };
       }
     | undefined;
-  let onchainCreationError: string | undefined;
 
   if (resolvedOnchainCreate?.enabled) {
-    try {
-      const onchainResult = await createProposalOnchain(proposal.id, {
+    const prepared = await prepareProposalOnchainCreate(
+      proposal.id,
+      {
         governanceProgramId: resolvedOnchainCreate.governanceProgramId,
         programVersion: resolvedOnchainCreate.programVersion,
         realmAddress: resolvedOnchainCreate.realmAddress,
@@ -424,17 +458,25 @@ export const publishFlow = async (
         useDenyOption: resolvedOnchainCreate.useDenyOption,
         rpcUrl: resolvedOnchainCreate.rpcUrl,
         signOff: resolvedOnchainCreate.signOff,
-        requireSimulation: resolvedOnchainCreate.requireSimulation,
-      }, userId);
+      },
+      userId,
+    );
 
-      onchainCreation = {
-        signatures: onchainResult.signatures,
-        onchainProposalAddress: onchainResult.proposal.onchainExecution.proposalAddress,
-        onchainTransactionAddresses: onchainResult.proposal.onchainExecution.transactionAddresses,
-      };
-    } catch (error) {
-      onchainCreationError = error instanceof Error ? error.message : 'Unknown onchain creation error';
-    }
+    onchainPreparation = {
+      proposalAddress: prepared.proposalAddress,
+      transactionAddresses: prepared.transactionAddresses,
+      preparedTransactions: prepared.preparedTransactions,
+      onchainExecution: {
+        enabled: true,
+        governanceProgramId: resolvedOnchainCreate.governanceProgramId!,
+        programVersion: resolvedOnchainCreate.programVersion,
+        governanceAddress: resolvedOnchainCreate.governanceAddress,
+        proposalAddress: prepared.proposalAddress,
+        transactionAddresses: prepared.transactionAddresses,
+        rpcUrl: resolvedOnchainCreate.rpcUrl,
+        requireSimulation: resolvedOnchainCreate.requireSimulation,
+      },
+    };
   }
 
   flow.status = 'published';
@@ -447,7 +489,6 @@ export const publishFlow = async (
     flow,
     proposalId: proposal.id,
     compilation,
-    onchainCreation,
-    onchainCreationError,
+    onchainPreparation,
   };
 };

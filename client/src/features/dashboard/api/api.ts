@@ -432,12 +432,38 @@ export type PublishFlowResult = {
   flow: FlowItem;
   proposalId: string;
   compilation: FlowCompilationResult;
-  onchainCreation?: {
-    signatures: string[];
-    onchainProposalAddress: string | null;
-    onchainTransactionAddresses: string[];
+  onchainPreparation?: {
+    proposalAddress: string;
+    transactionAddresses: string[];
+    preparedTransactions: PreparedTransaction[];
+    onchainExecution: ProposalOnchainExecutionInput;
   };
-  onchainCreationError?: string;
+};
+
+export type PreparedTransaction = {
+  label: string;
+  transactionMessage: string;
+  transactionBase58: string;
+  transactionBase64: string;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
+};
+
+export type ProposalOnchainExecutionInput = {
+  enabled: boolean;
+  governanceProgramId?: string;
+  programVersion: number;
+  governanceAddress?: string;
+  proposalAddress?: string;
+  transactionAddresses: string[];
+  rpcUrl?: string;
+  requireSimulation: boolean;
+};
+
+export type PrepareProposalOnchainExecutionResult = {
+  proposal: ProposalItem;
+  skippedTransactionAddresses: string[];
+  preparedTransactions: PreparedTransaction[];
 };
 
 type ListOptions = {
@@ -604,6 +630,28 @@ export const getDaoProposals = async (daoId: string, options: ProposalListOption
       state: options.state,
     })}`,
   );
+
+export const updateProposalOnchainExecution = async (
+  proposalId: string,
+  input: ProposalOnchainExecutionInput,
+  accessToken: string,
+): Promise<ProposalItem> =>
+  apiRequest<ProposalItem>(`/proposals/${proposalId}/onchain-execution`, {
+    method: 'PATCH',
+    body: input as unknown as Record<string, unknown>,
+    accessToken,
+  });
+
+export const prepareProposalOnchainExecution = async (
+  proposalId: string,
+  accessToken: string,
+  input: { rpcUrl?: string } = {},
+): Promise<PrepareProposalOnchainExecutionResult> =>
+  apiRequest<PrepareProposalOnchainExecutionResult>(`/proposals/${proposalId}/prepare-onchain-execution`, {
+    method: 'POST',
+    body: input,
+    accessToken,
+  });
 
 export const getWorkflows = async (
   daoId: string,

@@ -5,6 +5,7 @@ import {
   getDaoGovernances,
   getFlowById,
   publishFlow,
+  updateProposalOnchainExecution,
   type DaoGovernanceItem,
   type DaoItem,
   type FlowBlockInput,
@@ -16,6 +17,7 @@ import {
   updateFlow,
 } from '@/features/dashboard/api/api';
 import { formatDateTime } from '@/features/dashboard/lib/format';
+import { getSolanaProvider, sendPreparedTransaction } from '@/shared/solana/wallet';
 
 const canvasNodeHeight = 210;
 const defaultNodeWidth = 360;
@@ -848,8 +850,46 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
           : {},
         accessToken,
       );
+
+      let onchainSignatures: string[] = [];
+
+      if (publishOnchainNow) {
+        if (!result.onchainPreparation) {
+          throw new Error('On-chain preparation was not returned by the server.');
+        }
+
+        const provider = getSolanaProvider();
+
+        if (!provider) {
+          throw new Error('No Solana wallet detected. Install Phantom or another wallet extension.');
+        }
+
+        const connectResult = await provider.connect();
+        const connectedWallet = connectResult.publicKey?.toBase58() ?? provider.publicKey?.toBase58();
+
+        if (!connectedWallet) {
+          throw new Error('Wallet connection failed. Try reconnecting your wallet.');
+        }
+
+        for (const prepared of result.onchainPreparation.preparedTransactions) {
+          const signature = await sendPreparedTransaction(
+            provider,
+            prepared.transactionMessage,
+            prepared.transactionBase58,
+            prepared.transactionBase64,
+          );
+          onchainSignatures.push(signature);
+        }
+
+        await updateProposalOnchainExecution(result.proposalId, result.onchainPreparation.onchainExecution, accessToken);
+      }
+
       setLastPublishResult(result);
-      setSuccess('Flow published successfully.');
+      setSuccess(
+        publishOnchainNow
+          ? `Flow published and submitted on-chain (${onchainSignatures.length} wallet signatures).`
+          : 'Flow published successfully.',
+      );
       onFlowPublished(result);
       onFlowSaved();
       setCompileResult(result.compilation);
@@ -1644,14 +1684,11 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
             <p>
               Proposal monitor: <a href="/dashboard/proposals">Open Proposals page</a>
             </p>
-            {lastPublishResult.onchainCreation ? (
+            {lastPublishResult.onchainPreparation ? (
               <>
-                <p>On-chain signatures: {lastPublishResult.onchainCreation.signatures.length}</p>
-                <p>On-chain proposal: {lastPublishResult.onchainCreation.onchainProposalAddress ?? 'N/A'}</p>
+                <p>Prepared on-chain transactions: {lastPublishResult.onchainPreparation.preparedTransactions.length}</p>
+                <p>On-chain proposal: {lastPublishResult.onchainPreparation.proposalAddress}</p>
               </>
-            ) : null}
-            {lastPublishResult.onchainCreationError ? (
-              <p className="error-text">On-chain creation error: {lastPublishResult.onchainCreationError}</p>
             ) : null}
             <p>Updated at: {formatDateTime(lastPublishResult.flow.updatedAt)}</p>
           </div>

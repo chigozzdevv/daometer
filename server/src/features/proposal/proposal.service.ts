@@ -2,10 +2,15 @@ import { Types } from 'mongoose';
 import { Connection, PublicKey, type Commitment } from '@solana/web3.js';
 import { getProposal, getProposalTransactionAddress, ProposalState as OnchainProposalState } from '@realms-today/spl-governance';
 import { env } from '@/config/env.config';
+import { UserModel } from '@/features/auth/auth.model';
 import { DaoModel } from '@/features/dao/dao.model';
 import { ProposalModel, type ProposalDocument } from '@/features/proposal/proposal.model';
 import { AppError } from '@/shared/errors/app-error';
-import { createOnchainProposalFromStoredInstructions } from '@/shared/solana/governance-proposal-creator';
+import {
+  createOnchainProposalFromStoredInstructions,
+  prepareOnchainProposalFromStoredInstructions,
+} from '@/shared/solana/governance-proposal-creator';
+import { prepareGovernanceProposalExecutionTransactions } from '@/shared/solana/governance-executor';
 import { assertInstructionsAreOnchainCreatable } from '@/shared/solana/onchain-instruction-support.util';
 import { assertCanManageDao } from '@/shared/utils/authorization.util';
 import { generateBase58String } from '@/shared/utils/base58.util';
@@ -546,6 +551,136 @@ export const markProposalExecuted = async (proposalId: Types.ObjectId, execution
   await proposal.save();
 
   return proposal;
+};
+
+export const prepareProposalOnchainCreate = async (
+  proposalId: string,
+  input: {
+    governanceProgramId?: string;
+    programVersion: number;
+    realmAddress: string;
+    governanceAddress: string;
+    governingTokenMint: string;
+    descriptionLink?: string;
+    optionIndex: number;
+    useDenyOption: boolean;
+    rpcUrl?: string;
+    signOff: boolean;
+  },
+  actorUserId: Types.ObjectId,
+): Promise<{
+  proposal: ProposalDocument;
+  proposalAddress: string;
+  transactionAddresses: string[];
+  preparedTransactions: Array<{
+    label: string;
+    transactionMessage: string;
+    transactionBase58: string;
+    transactionBase64: string;
+    recentBlockhash: string;
+    lastValidBlockHeight: number;
+  }>;
+}> => {
+  const proposal = await ProposalModel.findById(proposalId);
+
+  if (!proposal) {
+    throw new AppError('Proposal not found', 404, 'PROPOSAL_NOT_FOUND');
+  }
+
+  const dao = await assertCanManageDao(proposal.daoId, actorUserId);
+  const actor = await UserModel.findById(actorUserId).select('walletAddress');
+
+  if (!actor?.walletAddress) {
+    throw new AppError('Connected wallet not found', 401, 'UNAUTHORIZED');
+  }
+
+  assertInstructionsAreOnchainCreatable(proposal.instructions);
+
+  const result = await prepareOnchainProposalFromStoredInstructions({
+    governanceProgramId: input.governanceProgramId ?? dao.governanceProgramId,
+    programVersion: input.programVersion,
+    realmAddress: input.realmAddress,
+    governanceAddress: input.governanceAddress,
+    governingTokenMint: input.governingTokenMint,
+    proposalName: proposal.title,
+    descriptionLink: input.descriptionLink ?? 'https://docs.realms.today',
+    holdUpSeconds: proposal.holdUpSeconds,
+    instructions: proposal.instructions,
+    optionIndex: input.optionIndex,
+    useDenyOption: input.useDenyOption,
+    rpcUrl: input.rpcUrl,
+    signOff: input.signOff,
+    authorityWallet: actor.walletAddress,
+    payerWallet: actor.walletAddress,
+  });
+
+  return {
+    proposal,
+    proposalAddress: result.proposalAddress,
+    transactionAddresses: result.transactionAddresses,
+    preparedTransactions: result.preparedTransactions,
+  };
+};
+
+export const prepareProposalOnchainExecution = async (
+  proposalId: string,
+  input: {
+    rpcUrl?: string;
+  },
+  actorUserId: Types.ObjectId,
+): Promise<{
+  proposal: ProposalDocument;
+  skippedTransactionAddresses: string[];
+  preparedTransactions: Array<{
+    label: string;
+    transactionMessage: string;
+    transactionBase58: string;
+    transactionBase64: string;
+    recentBlockhash: string;
+    lastValidBlockHeight: number;
+  }>;
+}> => {
+  const proposal = await ProposalModel.findById(proposalId);
+
+  if (!proposal) {
+    throw new AppError('Proposal not found', 404, 'PROPOSAL_NOT_FOUND');
+  }
+
+  await assertCanManageDao(proposal.daoId, actorUserId);
+
+  if (!proposal.onchainExecution.enabled) {
+    throw new AppError('On-chain execution is not enabled for this proposal', 400, 'ONCHAIN_EXECUTION_NOT_ENABLED');
+  }
+
+  if (
+    !proposal.onchainExecution.governanceProgramId ||
+    !proposal.onchainExecution.governanceAddress ||
+    !proposal.onchainExecution.proposalAddress
+  ) {
+    throw new AppError('On-chain execution metadata is incomplete', 400, 'ONCHAIN_EXECUTION_METADATA_MISSING');
+  }
+
+  const actor = await UserModel.findById(actorUserId).select('walletAddress');
+
+  if (!actor?.walletAddress) {
+    throw new AppError('Connected wallet not found', 401, 'UNAUTHORIZED');
+  }
+
+  const prepared = await prepareGovernanceProposalExecutionTransactions({
+    governanceProgramId: proposal.onchainExecution.governanceProgramId,
+    programVersion: proposal.onchainExecution.programVersion,
+    governanceAddress: proposal.onchainExecution.governanceAddress,
+    proposalAddress: proposal.onchainExecution.proposalAddress,
+    transactionAddresses: proposal.onchainExecution.transactionAddresses,
+    feePayerWallet: actor.walletAddress,
+    rpcUrl: input.rpcUrl ?? proposal.onchainExecution.rpcUrl ?? undefined,
+  });
+
+  return {
+    proposal,
+    skippedTransactionAddresses: prepared.skippedTransactionAddresses,
+    preparedTransactions: prepared.preparedTransactions,
+  };
 };
 
 export const markProposalExecutionFailed = async (proposalId: Types.ObjectId, reason: string): Promise<void> => {

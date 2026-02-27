@@ -4,6 +4,8 @@ import { ExecutionJobModel, type ExecutionJobDocument } from '@/features/executi
 import type { ProposalDocument } from '@/features/proposal/proposal.model';
 import { AppError } from '@/shared/errors/app-error';
 
+const NON_CUSTODIAL_EXECUTION_REQUIRED = 'NON_CUSTODIAL_EXECUTION_REQUIRED';
+
 export const scheduleExecutionJobFromProposal = async (
   proposal: ProposalDocument,
   now = new Date(),
@@ -46,6 +48,14 @@ export const scheduleExecutionJobFromProposal = async (
   }
 
   if (existingJob.status === 'running') {
+    return existingJob;
+  }
+
+  if (
+    existingJob.status === 'failed' &&
+    typeof existingJob.lastError === 'string' &&
+    existingJob.lastError.includes(NON_CUSTODIAL_EXECUTION_REQUIRED)
+  ) {
     return existingJob;
   }
 

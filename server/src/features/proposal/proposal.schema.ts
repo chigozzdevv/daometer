@@ -165,6 +165,35 @@ export const createProposalOnchainSchema = z.object({
   query: emptyObject,
 });
 
+export const prepareProposalOnchainCreateSchema = z.object({
+  body: z.object({
+    governanceProgramId: z.string().trim().regex(base58Regex).optional(),
+    programVersion: z.number().int().min(1).max(10).default(3),
+    realmAddress: z.string().trim().regex(base58Regex),
+    governanceAddress: z.string().trim().regex(base58Regex),
+    governingTokenMint: z.string().trim().regex(base58Regex),
+    descriptionLink: z.string().trim().url().optional(),
+    optionIndex: z.number().int().min(0).max(20).default(0),
+    useDenyOption: z.boolean().default(true),
+    rpcUrl: z.string().trim().url().optional(),
+    signOff: z.boolean().default(true),
+  }),
+  params: z.object({
+    proposalId: z.string().trim().length(24),
+  }),
+  query: emptyObject,
+});
+
+export const prepareProposalOnchainExecutionSchema = z.object({
+  body: z.object({
+    rpcUrl: z.string().trim().url().optional(),
+  }),
+  params: z.object({
+    proposalId: z.string().trim().length(24),
+  }),
+  query: emptyObject,
+});
+
 export const decideProposalManualApprovalSchema = z.object({
   body: z.object({
     approved: z.boolean(),
