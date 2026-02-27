@@ -1,8 +1,16 @@
 import { Types } from 'mongoose';
 import BN from 'bn.js';
 import bs58 from 'bs58';
+import { randomBytes } from 'node:crypto';
 import { PublicKey } from '@solana/web3.js';
-import { Connection, Transaction, type Commitment, type TransactionInstruction } from '@solana/web3.js';
+import {
+  Connection,
+  SystemProgram,
+  SYSVAR_RENT_PUBKEY,
+  Transaction,
+  TransactionInstruction,
+  type Commitment,
+} from '@solana/web3.js';
 import { MintMaxVoteWeightSource, withCreateRealm } from '@realms-today/spl-governance';
 import { env } from '@/config/env.config';
 import { UserModel } from '@/features/auth/auth.model';
@@ -50,6 +58,14 @@ type PrepareDaoOnchainCreateInput = {
   programVersion: number;
 };
 
+type PrepareCommunityMintInput = {
+  name: string;
+  network: 'mainnet-beta' | 'devnet';
+  authorityWallet?: string;
+  decimals: number;
+  rpcUrl?: string;
+};
+
 const normalizeAddress = (address: string, fieldName: string): string => {
   try {
     return new PublicKey(address).toBase58();
@@ -61,6 +77,34 @@ const normalizeAddress = (address: string, fieldName: string): string => {
 const defaultRpcByNetwork: Record<'devnet' | 'mainnet-beta', string> = {
   devnet: 'https://api.devnet.solana.com',
   'mainnet-beta': 'https://api.mainnet-beta.solana.com',
+};
+
+const TOKEN_MINT_ACCOUNT_SIZE = 82;
+
+const buildTokenSymbol = (name: string): string => {
+  const words = name
+    .trim()
+    .replace(/[^a-zA-Z0-9 ]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const initials = words.map((word) => word[0]?.toUpperCase() ?? '').join('');
+
+  if (initials.length >= 2) {
+    return initials.slice(0, 5);
+  }
+
+  const compact = name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  return (compact || 'DAO').slice(0, 5);
+};
+
+const buildMintSeed = (name: string): string => {
+  const base = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .slice(0, 18);
+  const suffix = randomBytes(4).toString('hex');
+  return `dm${base}${suffix}`.slice(0, 32);
 };
 
 export const createDao = async (input: CreateDaoInput, userId: Types.ObjectId): Promise<DaoDocument> => {
@@ -184,6 +228,104 @@ export const prepareDaoOnchainCreate = async (
     realmAddress: realmAddress.toBase58(),
     authorityWallet: requestedAuthorityWallet,
     governanceProgramId,
+    rpcUrl,
+    recentBlockhash: latestBlockhash.blockhash,
+    lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+    network: input.network,
+  };
+};
+
+export const prepareCommunityMintCreate = async (
+  input: PrepareCommunityMintInput,
+  userId: Types.ObjectId,
+): Promise<{
+  transactionMessage: string;
+  transactionBase64: string;
+  mintAddress: string;
+  symbol: string;
+  decimals: number;
+  authorityWallet: string;
+  payerWallet: string;
+  seed: string;
+  rpcUrl: string;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
+  network: 'mainnet-beta' | 'devnet';
+}> => {
+  const creator = await UserModel.findById(userId).select('walletAddress roles');
+
+  if (!creator?.walletAddress) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const creatorWalletAddress = normalizeAddress(creator.walletAddress, 'creator wallet');
+  const requestedAuthorityWallet = input.authorityWallet
+    ? normalizeAddress(input.authorityWallet, 'authority wallet')
+    : creatorWalletAddress;
+  const isAdmin = creator.roles.includes('admin');
+
+  if (!isAdmin && requestedAuthorityWallet !== creatorWalletAddress) {
+    throw new AppError('Authority wallet must match your connected wallet', 403, 'DAO_AUTHORITY_WALLET_MISMATCH');
+  }
+
+  const rpcUrl = input.rpcUrl ?? defaultRpcByNetwork[input.network];
+  const connection = new Connection(rpcUrl, { commitment: env.SOLANA_COMMITMENT as Commitment });
+  const payerPubkey = new PublicKey(creatorWalletAddress);
+  const authorityPubkey = new PublicKey(requestedAuthorityWallet);
+  const tokenProgramPubkey = new PublicKey(SOLANA_PROGRAM_IDS.tokenProgram);
+  const seed = buildMintSeed(input.name);
+  const mintPubkey = await PublicKey.createWithSeed(payerPubkey, seed, tokenProgramPubkey);
+  const symbol = buildTokenSymbol(input.name);
+  const rentExemptLamports = await connection.getMinimumBalanceForRentExemption(TOKEN_MINT_ACCOUNT_SIZE);
+
+  const createMintAccountIx = SystemProgram.createAccountWithSeed({
+    fromPubkey: payerPubkey,
+    newAccountPubkey: mintPubkey,
+    basePubkey: payerPubkey,
+    seed,
+    lamports: rentExemptLamports,
+    space: TOKEN_MINT_ACCOUNT_SIZE,
+    programId: tokenProgramPubkey,
+  });
+
+  // SPL Token `InitializeMint` instruction layout:
+  // [instruction=0, decimals, mintAuthority(32), freezeAuthorityOption(1), freezeAuthority(32)]
+  const initializeMintData = Buffer.alloc(67);
+  initializeMintData.writeUInt8(0, 0);
+  initializeMintData.writeUInt8(input.decimals, 1);
+  authorityPubkey.toBuffer().copy(initializeMintData, 2);
+  initializeMintData.writeUInt8(0, 34);
+
+  const initializeMintIx = new TransactionInstruction({
+    programId: tokenProgramPubkey,
+    keys: [
+      { pubkey: mintPubkey, isSigner: false, isWritable: true },
+      { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
+    ],
+    data: initializeMintData,
+  });
+
+  const transaction = new Transaction().add(createMintAccountIx, initializeMintIx);
+  transaction.feePayer = payerPubkey;
+  const latestBlockhash = await connection.getLatestBlockhash(env.SOLANA_COMMITMENT as Commitment);
+  transaction.recentBlockhash = latestBlockhash.blockhash;
+  const transactionMessage = bs58.encode(transaction.serializeMessage());
+  const transactionBase64 = transaction
+    .serialize({
+      requireAllSignatures: false,
+      verifySignatures: false,
+    })
+    .toString('base64');
+
+  return {
+    transactionMessage,
+    transactionBase64,
+    mintAddress: mintPubkey.toBase58(),
+    symbol,
+    decimals: input.decimals,
+    authorityWallet: requestedAuthorityWallet,
+    payerWallet: creatorWalletAddress,
+    seed,
     rpcUrl,
     recentBlockhash: latestBlockhash.blockhash,
     lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,

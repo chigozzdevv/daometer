@@ -56,6 +56,29 @@ export type PrepareDaoOnchainResult = {
   network: 'mainnet-beta' | 'devnet';
 };
 
+export type PrepareCommunityMintInput = {
+  name: string;
+  network: 'mainnet-beta' | 'devnet';
+  authorityWallet?: string;
+  decimals?: number;
+  rpcUrl?: string;
+};
+
+export type PrepareCommunityMintResult = {
+  transactionMessage: string;
+  transactionBase64: string;
+  mintAddress: string;
+  symbol: string;
+  decimals: number;
+  authorityWallet: string;
+  payerWallet: string;
+  seed: string;
+  rpcUrl: string;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
+  network: 'mainnet-beta' | 'devnet';
+};
+
 export type FlowItem = {
   id: string;
   daoId: string;
@@ -336,6 +359,16 @@ export const prepareDaoOnchainCreate = async (
   accessToken: string,
 ): Promise<PrepareDaoOnchainResult> =>
   apiRequest<PrepareDaoOnchainResult>('/daos/onchain-create', {
+    method: 'POST',
+    body: input,
+    accessToken,
+  });
+
+export const prepareCommunityMint = async (
+  input: PrepareCommunityMintInput,
+  accessToken: string,
+): Promise<PrepareCommunityMintResult> =>
+  apiRequest<PrepareCommunityMintResult>('/daos/prepare-community-mint', {
     method: 'POST',
     body: input,
     accessToken,

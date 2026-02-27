@@ -42,6 +42,18 @@ export const createDaoOnchainSchema = z.object({
   query: emptyObject,
 });
 
+export const prepareCommunityMintSchema = z.object({
+  body: z.object({
+    name: z.string().trim().min(2).max(120),
+    network: z.enum(['mainnet-beta', 'devnet']).default('devnet'),
+    authorityWallet: z.string().trim().regex(base58Regex, 'Invalid authority wallet').optional(),
+    decimals: z.number().int().min(0).max(9).default(6),
+    rpcUrl: z.string().trim().url().optional(),
+  }),
+  params: emptyObject,
+  query: emptyObject,
+});
+
 export const updateDaoSchema = z.object({
   body: z
     .object({

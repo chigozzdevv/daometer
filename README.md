@@ -94,6 +94,7 @@ Configured by `API_PREFIX` (default: `/api/v1`).
 - `GET /api/v1/daos`
 - `POST /api/v1/daos`
 - `POST /api/v1/daos/onchain-create`
+- `POST /api/v1/daos/prepare-community-mint`
 - `GET /api/v1/daos/:daoId`
 - `PATCH /api/v1/daos/:daoId`
 - `GET /api/v1/flows`
@@ -234,6 +235,7 @@ DAO on-chain creation support:
 
 - `POST /api/v1/daos/onchain-create` prepares an unsigned Realm-creation transaction for wallet signing.
 - The connected user wallet is the fee payer/signer; backend only prepares metadata and stores DAO records when explicitly posted to `POST /api/v1/daos`.
+- `POST /api/v1/daos/prepare-community-mint` prepares an unsigned SPL mint-creation transaction (wallet-signed) and returns the generated mint address for Community Mint usage.
 
 ## Notes
 

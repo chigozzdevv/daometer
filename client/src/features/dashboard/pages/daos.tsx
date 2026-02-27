@@ -4,6 +4,7 @@ import {
   createDao,
   getAuthProfile,
   getDaos,
+  prepareCommunityMint,
   prepareDaoOnchainCreate,
   type DaoItem,
 } from '@/features/dashboard/api/api';
@@ -139,6 +140,7 @@ export const DashboardDaosPage = (): JSX.Element => {
   const [isLoading, setIsLoading] = useState(true);
   const [isImporting, setIsImporting] = useState(false);
   const [isCreatingOnchain, setIsCreatingOnchain] = useState(false);
+  const [isCreatingCommunityMint, setIsCreatingCommunityMint] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
@@ -326,6 +328,69 @@ export const DashboardDaosPage = (): JSX.Element => {
     }
   };
 
+  const handleCreateCommunityMint = async (): Promise<void> => {
+    setOnchainError(null);
+    setOnchainSuccess(null);
+
+    if (!session?.accessToken) {
+      setOnchainError('You must be authenticated to create a community mint.');
+      return;
+    }
+
+    if (!onchainName.trim()) {
+      setOnchainError('DAO name is required to generate a token symbol and mint.');
+      return;
+    }
+
+    setIsCreatingCommunityMint(true);
+
+    try {
+      const provider = getSolanaProvider();
+
+      if (!provider) {
+        throw new Error('No Solana wallet detected. Install Phantom or another wallet extension.');
+      }
+
+      const connectResult = await provider.connect();
+      const connectedWallet = connectResult.publicKey?.toBase58() ?? provider.publicKey?.toBase58();
+
+      if (!connectedWallet) {
+        throw new Error('Wallet connection failed. Try reconnecting your wallet.');
+      }
+
+      const prepared = await prepareCommunityMint(
+        {
+          name: onchainName.trim(),
+          network: onchainNetwork,
+          authorityWallet: onchainAuthorityWallet.trim() || undefined,
+          decimals: 6,
+        },
+        session.accessToken,
+      );
+
+      if (connectedWallet !== prepared.payerWallet) {
+        throw new Error('Connected wallet must match the payer wallet to create community mint.');
+      }
+
+      const signature = await sendPreparedTransaction(
+        provider,
+        prepared.transactionMessage,
+        prepared.transactionBase64,
+      );
+
+      setOnchainAuthorityWallet(prepared.authorityWallet);
+      setOnchainCommunityMint(prepared.mintAddress);
+      setImportCommunityMint(prepared.mintAddress);
+      setOnchainSuccess(
+        `Community mint created (${prepared.symbol}) ${prepared.mintAddress.slice(0, 8)}... Tx: ${signature.slice(0, 12)}...`,
+      );
+    } catch (createMintError) {
+      setOnchainError(createMintError instanceof Error ? createMintError.message : 'Unable to create community mint');
+    } finally {
+      setIsCreatingCommunityMint(false);
+    }
+  };
+
   return (
     <DashboardShell title="DAOs" description="Create on-chain Realms, then import existing Realm addresses into Daometer.">
       <article className="data-card">
@@ -385,6 +450,17 @@ export const DashboardDaosPage = (): JSX.Element => {
               <input className="text-input" value={onchainCommunityMint} onChange={(event) => setOnchainCommunityMint(event.target.value)} required />
             </label>
 
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={isImporting || isCreatingOnchain || isCreatingCommunityMint}
+              onClick={() => {
+                void handleCreateCommunityMint();
+              }}
+            >
+              {isCreatingCommunityMint ? 'Generating Community Mint...' : 'Generate Community Mint'}
+            </button>
+
             <label className="input-label">
               Council Mint (optional)
               <input className="text-input" value={onchainCouncilMint} onChange={(event) => setOnchainCouncilMint(event.target.value)} />
@@ -400,7 +476,7 @@ export const DashboardDaosPage = (): JSX.Element => {
             <button
               type="button"
               className="primary-button"
-              disabled={isImporting || isCreatingOnchain}
+              disabled={isImporting || isCreatingOnchain || isCreatingCommunityMint}
               onClick={() => {
                 void handleCreateOnchainDao();
               }}
