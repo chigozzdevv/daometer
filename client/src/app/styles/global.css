@@ -1212,6 +1212,12 @@ p {
   gap: 0.35rem;
 }
 
+.dao-governance-config-form {
+  display: grid;
+  gap: 0.45rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .dao-governance-config-controls {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -1789,6 +1795,10 @@ p {
   }
 
   .dao-governance-config-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .dao-governance-config-form {
     grid-template-columns: 1fr;
   }
 }

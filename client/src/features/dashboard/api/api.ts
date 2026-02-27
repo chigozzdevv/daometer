@@ -113,6 +113,15 @@ export type PrepareDaoGovernanceInput = {
   createAuthorityWallet?: string;
   voteScope?: 'community' | 'council';
   governingTokenMint?: string;
+  governanceConfig?: {
+    communityYesVoteThresholdPercent?: number;
+    councilYesVoteThresholdPercent?: number;
+    councilVetoVoteThresholdPercent?: number;
+    baseVotingTimeHours?: number;
+    instructionHoldUpTimeHours?: number;
+    voteTipping?: 'strict' | 'early' | 'disabled';
+    councilVoteTipping?: 'strict' | 'early' | 'disabled';
+  };
   rpcUrl?: string;
   programVersion?: number;
 };

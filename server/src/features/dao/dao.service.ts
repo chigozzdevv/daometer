@@ -85,6 +85,15 @@ type PrepareGovernanceCreateInput = {
   createAuthorityWallet?: string;
   voteScope: 'community' | 'council';
   governingTokenMint?: string;
+  governanceConfig?: {
+    communityYesVoteThresholdPercent?: number;
+    councilYesVoteThresholdPercent?: number;
+    councilVetoVoteThresholdPercent?: number;
+    baseVotingTimeHours?: number;
+    instructionHoldUpTimeHours?: number;
+    voteTipping?: 'strict' | 'early' | 'disabled';
+    councilVoteTipping?: 'strict' | 'early' | 'disabled';
+  };
   rpcUrl?: string;
   programVersion: number;
 };
@@ -375,29 +384,50 @@ export const prepareCommunityMintCreate = async (
   };
 };
 
-const buildDefaultGovernanceConfig = (hasCouncil: boolean): GovernanceConfig => {
-  const yes60 = new VoteThreshold({
-    type: VoteThresholdType.YesVotePercentage,
-    value: 60,
-  });
-  const yes50 = new VoteThreshold({
-    type: VoteThresholdType.YesVotePercentage,
-    value: 50,
-  });
+const mapVoteTipping = (value: 'strict' | 'early' | 'disabled' | undefined): VoteTipping => {
+  if (value === 'early') {
+    return VoteTipping.Early;
+  }
+
+  if (value === 'disabled') {
+    return VoteTipping.Disabled;
+  }
+
+  return VoteTipping.Strict;
+};
+
+const buildDefaultGovernanceConfig = (
+  hasCouncil: boolean,
+  overrides?: PrepareGovernanceCreateInput['governanceConfig'],
+): GovernanceConfig => {
   const disabled = new VoteThreshold({
     type: VoteThresholdType.Disabled,
   });
+  const communityYesVoteThreshold = new VoteThreshold({
+    type: VoteThresholdType.YesVotePercentage,
+    value: overrides?.communityYesVoteThresholdPercent ?? 60,
+  });
+  const councilYesVoteThreshold = new VoteThreshold({
+    type: VoteThresholdType.YesVotePercentage,
+    value: overrides?.councilYesVoteThresholdPercent ?? 60,
+  });
+  const councilVetoVoteThreshold = new VoteThreshold({
+    type: VoteThresholdType.YesVotePercentage,
+    value: overrides?.councilVetoVoteThresholdPercent ?? 50,
+  });
 
   return new GovernanceConfig({
-    communityVoteThreshold: yes60,
+    communityVoteThreshold: communityYesVoteThreshold,
     minCommunityTokensToCreateProposal: new BN(1),
-    minInstructionHoldUpTime: 0,
-    baseVotingTime: 3 * 24 * 60 * 60,
-    communityVoteTipping: VoteTipping.Strict,
-    councilVoteThreshold: hasCouncil ? yes60 : disabled,
-    councilVetoVoteThreshold: hasCouncil ? yes50 : disabled,
+    minInstructionHoldUpTime: (overrides?.instructionHoldUpTimeHours ?? 0) * 60 * 60,
+    baseVotingTime: (overrides?.baseVotingTimeHours ?? 72) * 60 * 60,
+    communityVoteTipping: mapVoteTipping(overrides?.voteTipping),
+    councilVoteThreshold: hasCouncil ? councilYesVoteThreshold : disabled,
+    councilVetoVoteThreshold: hasCouncil ? councilVetoVoteThreshold : disabled,
     minCouncilTokensToCreateProposal: new BN(hasCouncil ? 1 : 0),
-    councilVoteTipping: VoteTipping.Strict,
+    councilVoteTipping: hasCouncil
+      ? mapVoteTipping(overrides?.councilVoteTipping ?? overrides?.voteTipping)
+      : VoteTipping.Strict,
     communityVetoVoteThreshold: disabled,
     votingCoolOffTime: 0,
     depositExemptProposalCount: 10,
@@ -502,7 +532,7 @@ export const prepareGovernanceCreate = async (
     );
   }
 
-  const governanceConfig = buildDefaultGovernanceConfig(hasCouncil);
+  const governanceConfig = buildDefaultGovernanceConfig(hasCouncil, input.governanceConfig);
   const governanceAddress = await withCreateGovernance(
     instructions,
     programIdPk,

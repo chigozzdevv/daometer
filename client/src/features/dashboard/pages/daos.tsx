@@ -297,6 +297,65 @@ const sendPreparedTransaction = async (
   throw new Error(`Wallet could not sign and send the prepared transaction.${details}`);
 };
 
+type GovernanceConfigPreset = 'balanced' | 'fast' | 'secure' | 'custom';
+type GovernanceVoteTipping = 'strict' | 'early' | 'disabled';
+type GovernanceConfigDraft = {
+  voteScope: 'community' | 'council';
+  preset: GovernanceConfigPreset;
+  communityYesVoteThresholdPercent: number;
+  councilYesVoteThresholdPercent: number;
+  councilVetoVoteThresholdPercent: number;
+  baseVotingTimeHours: number;
+  instructionHoldUpTimeHours: number;
+  voteTipping: GovernanceVoteTipping;
+  councilVoteTipping: GovernanceVoteTipping;
+};
+
+const governancePresetConfig = (
+  preset: GovernanceConfigPreset,
+  voteScope: 'community' | 'council',
+): GovernanceConfigDraft => {
+  if (preset === 'fast') {
+    return {
+      voteScope,
+      preset,
+      communityYesVoteThresholdPercent: 51,
+      councilYesVoteThresholdPercent: 51,
+      councilVetoVoteThresholdPercent: 50,
+      baseVotingTimeHours: 24,
+      instructionHoldUpTimeHours: 0,
+      voteTipping: 'early',
+      councilVoteTipping: 'early',
+    };
+  }
+
+  if (preset === 'secure') {
+    return {
+      voteScope,
+      preset,
+      communityYesVoteThresholdPercent: 70,
+      councilYesVoteThresholdPercent: 70,
+      councilVetoVoteThresholdPercent: 60,
+      baseVotingTimeHours: 120,
+      instructionHoldUpTimeHours: 24,
+      voteTipping: 'strict',
+      councilVoteTipping: 'strict',
+    };
+  }
+
+  return {
+    voteScope,
+    preset,
+    communityYesVoteThresholdPercent: 60,
+    councilYesVoteThresholdPercent: 60,
+    councilVetoVoteThresholdPercent: 50,
+    baseVotingTimeHours: 72,
+    instructionHoldUpTimeHours: 0,
+    voteTipping: 'strict',
+    councilVoteTipping: 'strict',
+  };
+};
+
 export const DashboardDaosPage = (): JSX.Element => {
   const { session } = useAuth();
   const [daos, setDaos] = useState<DaoItem[]>([]);
@@ -343,6 +402,7 @@ export const DashboardDaosPage = (): JSX.Element => {
   const [creatingGovernanceByDao, setCreatingGovernanceByDao] = useState<Record<string, boolean>>({});
   const [governanceCreateSuccessByDao, setGovernanceCreateSuccessByDao] = useState<Record<string, string | null>>({});
   const [governanceCreateErrorByDao, setGovernanceCreateErrorByDao] = useState<Record<string, string | null>>({});
+  const [governanceConfigByDao, setGovernanceConfigByDao] = useState<Record<string, GovernanceConfigDraft>>({});
 
   const loadDaos = async (): Promise<void> => {
     setIsLoading(true);
@@ -414,6 +474,19 @@ export const DashboardDaosPage = (): JSX.Element => {
     }
   };
 
+  const updateGovernanceConfigForDao = (
+    dao: DaoItem,
+    updater: (current: GovernanceConfigDraft) => GovernanceConfigDraft,
+  ): void => {
+    setGovernanceConfigByDao((current) => {
+      const existing = current[dao.id] ?? governancePresetConfig('balanced', dao.councilMint ? 'council' : 'community');
+      return {
+        ...current,
+        [dao.id]: updater(existing),
+      };
+    });
+  };
+
   const handleCreateGovernanceForDao = async (dao: DaoItem): Promise<void> => {
     setGovernanceCreateErrorByDao((current) => ({ ...current, [dao.id]: null }));
     setGovernanceCreateSuccessByDao((current) => ({ ...current, [dao.id]: null }));
@@ -427,6 +500,11 @@ export const DashboardDaosPage = (): JSX.Element => {
     }
 
     setCreatingGovernanceByDao((current) => ({ ...current, [dao.id]: true }));
+    const configDraft =
+      governanceConfigByDao[dao.id] ??
+      governancePresetConfig('balanced', dao.councilMint ? 'council' : 'community');
+    const resolvedVoteScope =
+      configDraft.voteScope === 'council' && !dao.councilMint ? 'community' : configDraft.voteScope;
 
     try {
       const provider = getSolanaProvider();
@@ -445,8 +523,17 @@ export const DashboardDaosPage = (): JSX.Element => {
       const prepared = await prepareDaoGovernanceCreate(
         dao.id,
         {
-          voteScope: 'community',
+          voteScope: resolvedVoteScope,
           createAuthorityWallet: connectedWallet,
+          governanceConfig: {
+            communityYesVoteThresholdPercent: configDraft.communityYesVoteThresholdPercent,
+            councilYesVoteThresholdPercent: configDraft.councilYesVoteThresholdPercent,
+            councilVetoVoteThresholdPercent: configDraft.councilVetoVoteThresholdPercent,
+            baseVotingTimeHours: configDraft.baseVotingTimeHours,
+            instructionHoldUpTimeHours: configDraft.instructionHoldUpTimeHours,
+            voteTipping: configDraft.voteTipping,
+            councilVoteTipping: configDraft.councilVoteTipping,
+          },
           programVersion: 3,
         },
         session.accessToken,
@@ -536,6 +623,18 @@ export const DashboardDaosPage = (): JSX.Element => {
       daos.forEach((dao) => {
         if (!next[dao.id] && dao.defaultGovernanceAddress) {
           next[dao.id] = dao.defaultGovernanceAddress;
+        }
+      });
+
+      return next;
+    });
+
+    setGovernanceConfigByDao((current) => {
+      const next = { ...current };
+
+      daos.forEach((dao) => {
+        if (!next[dao.id]) {
+          next[dao.id] = governancePresetConfig('balanced', dao.councilMint ? 'council' : 'community');
         }
       });
 
@@ -1232,8 +1331,13 @@ export const DashboardDaosPage = (): JSX.Element => {
 
       {!isLoading && !error && daos.length > 0 ? (
         <div className="data-grid">
-          {daos.map((dao) => (
-            <article key={dao.id} className="data-card">
+          {daos.map((dao) => {
+            const governanceDraft =
+              governanceConfigByDao[dao.id] ??
+              governancePresetConfig('balanced', dao.councilMint ? 'council' : 'community');
+
+            return (
+              <article key={dao.id} className="data-card">
               <div className="data-card-header">
                 <div>
                   <h3>{dao.name}</h3>
@@ -1317,6 +1421,134 @@ export const DashboardDaosPage = (): JSX.Element => {
                 ) : null}
 
                 <div className="dao-governance-quick-actions">
+                  <div className="dao-governance-config-form">
+                    <label className="input-label">
+                      Preset
+                      <select
+                        className="select-input"
+                        value={governanceDraft.preset}
+                        onChange={(event) => {
+                          const nextPreset = event.target.value as GovernanceConfigPreset;
+                          updateGovernanceConfigForDao(dao, (current) => {
+                            if (nextPreset === 'custom') {
+                              return { ...current, preset: 'custom' };
+                            }
+
+                            const nextScope = current.voteScope;
+                            return governancePresetConfig(nextPreset, nextScope);
+                          });
+                        }}
+                      >
+                        <option value="balanced">Balanced</option>
+                        <option value="fast">Fast</option>
+                        <option value="secure">Secure</option>
+                        <option value="custom">Custom</option>
+                      </select>
+                    </label>
+                    <label className="input-label">
+                      Vote scope
+                      <select
+                        className="select-input"
+                        value={governanceDraft.voteScope}
+                        onChange={(event) => {
+                          const nextScope = event.target.value as 'community' | 'council';
+                          updateGovernanceConfigForDao(dao, (current) => {
+                            if (current.preset === 'custom') {
+                              return {
+                                ...current,
+                                voteScope: nextScope,
+                              };
+                            }
+
+                            return governancePresetConfig(current.preset, nextScope);
+                          });
+                        }}
+                      >
+                        <option value="community">community</option>
+                        <option value="council" disabled={!dao.councilMint}>
+                          council{!dao.councilMint ? ' (no council mint)' : ''}
+                        </option>
+                      </select>
+                    </label>
+                    <label className="input-label">
+                      Community yes (%)
+                      <input
+                        className="text-input"
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={governanceDraft.communityYesVoteThresholdPercent}
+                        onChange={(event) => {
+                          updateGovernanceConfigForDao(dao, (current) => ({
+                            ...current,
+                            preset: 'custom',
+                            communityYesVoteThresholdPercent: Math.max(
+                              1,
+                              Math.min(100, Number(event.target.value) || 1),
+                            ),
+                          }));
+                        }}
+                      />
+                    </label>
+                    <label className="input-label">
+                      Voting time (hours)
+                      <input
+                        className="text-input"
+                        type="number"
+                        min={1}
+                        max={720}
+                        value={governanceDraft.baseVotingTimeHours}
+                        onChange={(event) => {
+                          updateGovernanceConfigForDao(dao, (current) => ({
+                            ...current,
+                            preset: 'custom',
+                            baseVotingTimeHours: Math.max(1, Math.min(720, Number(event.target.value) || 1)),
+                          }));
+                        }}
+                      />
+                    </label>
+                    <label className="input-label">
+                      Hold-up (hours)
+                      <input
+                        className="text-input"
+                        type="number"
+                        min={0}
+                        max={720}
+                        value={governanceDraft.instructionHoldUpTimeHours}
+                        onChange={(event) => {
+                          updateGovernanceConfigForDao(dao, (current) => ({
+                            ...current,
+                            preset: 'custom',
+                            instructionHoldUpTimeHours: Math.max(
+                              0,
+                              Math.min(720, Number(event.target.value) || 0),
+                            ),
+                          }));
+                        }}
+                      />
+                    </label>
+                    <label className="input-label">
+                      Vote tipping
+                      <select
+                        className="select-input"
+                        value={governanceDraft.voteTipping}
+                        onChange={(event) => {
+                          const next = event.target.value as GovernanceVoteTipping;
+                          updateGovernanceConfigForDao(dao, (current) => ({
+                            ...current,
+                            preset: 'custom',
+                            voteTipping: next,
+                            councilVoteTipping: current.voteScope === 'council' ? next : current.councilVoteTipping,
+                          }));
+                        }}
+                      >
+                        <option value="strict">strict</option>
+                        <option value="early">early</option>
+                        <option value="disabled">disabled</option>
+                      </select>
+                    </label>
+                  </div>
+
                   <button
                     type="button"
                     className="secondary-button"
@@ -1327,7 +1559,7 @@ export const DashboardDaosPage = (): JSX.Element => {
                   >
                     {creatingGovernanceByDao[dao.id] ? 'Creating governance...' : 'Create governance + treasury'}
                   </button>
-                  <span className="hint-text">Wallet-sign. Uses DAO authority wallet and default voting config.</span>
+                  <span className="hint-text">Wallet-sign. Uses DAO authority wallet and the config above.</span>
                 </div>
 
                 {governancesByDao[dao.id] ? (
@@ -1406,8 +1638,9 @@ export const DashboardDaosPage = (): JSX.Element => {
                   View Realm on Explorer
                 </a>
               </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </div>
       ) : null}
     </DashboardShell>

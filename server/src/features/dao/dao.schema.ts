@@ -60,6 +60,17 @@ export const prepareGovernanceCreateSchema = z.object({
     createAuthorityWallet: z.string().trim().regex(base58Regex, 'Invalid create authority wallet').optional(),
     voteScope: z.enum(['community', 'council']).default('community'),
     governingTokenMint: z.string().trim().regex(base58Regex, 'Invalid governing token mint').optional(),
+    governanceConfig: z
+      .object({
+        communityYesVoteThresholdPercent: z.number().int().min(1).max(100).optional(),
+        councilYesVoteThresholdPercent: z.number().int().min(1).max(100).optional(),
+        councilVetoVoteThresholdPercent: z.number().int().min(1).max(100).optional(),
+        baseVotingTimeHours: z.number().int().min(1).max(720).optional(),
+        instructionHoldUpTimeHours: z.number().int().min(0).max(720).optional(),
+        voteTipping: z.enum(['strict', 'early', 'disabled']).optional(),
+        councilVoteTipping: z.enum(['strict', 'early', 'disabled']).optional(),
+      })
+      .optional(),
     rpcUrl: z.string().trim().url().optional(),
     programVersion: z.number().int().min(1).max(10).default(3),
   }),
