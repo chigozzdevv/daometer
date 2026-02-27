@@ -21,6 +21,8 @@ const SYSTEM_PROGRAM_ID = '11111111111111111111111111111111';
 const getRealmDetailUrl = (realmAddress: string, network: 'mainnet-beta' | 'devnet'): string =>
   `https://app.realms.today/dao/${realmAddress}${network === 'devnet' ? '?cluster=devnet' : ''}`;
 
+const shortAddress = (value: string): string => `${value.slice(0, 6)}...${value.slice(-6)}`;
+
 const stateChip = (state: ProposalItem['state']): JSX.Element => {
   const map: Record<ProposalItem['state'], string> = {
     voting: 'status-chip--yellow',
@@ -53,6 +55,8 @@ export const DashboardProposalsPage = (): JSX.Element => {
   const [proposals, setProposals] = useState<ProposalItem[]>([]);
   const [isLoadingDaos, setIsLoadingDaos] = useState(true);
   const [isLoadingProposals, setIsLoadingProposals] = useState(true);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -163,28 +167,45 @@ export const DashboardProposalsPage = (): JSX.Element => {
     }
 
     let isMounted = true;
+    let interval: number | null = null;
 
-    const loadProposals = async (): Promise<void> => {
-      setIsLoadingProposals(true);
+    const loadProposals = async (showLoading = true): Promise<void> => {
+      if (showLoading) {
+        setIsLoadingProposals(true);
+      }
+
       setError(null);
 
       try {
         const items = await getDaoProposals(selectedDaoId, { limit: 100 });
         if (!isMounted) return;
         setProposals(items);
+        setLastRefreshedAt(new Date().toISOString());
       } catch (loadError) {
         if (!isMounted) return;
         setError(loadError instanceof Error ? loadError.message : 'Unable to load proposals');
       } finally {
-        if (isMounted) setIsLoadingProposals(false);
+        if (isMounted && showLoading) {
+          setIsLoadingProposals(false);
+        }
       }
     };
 
-    void loadProposals();
+    void loadProposals(true);
+
+    if (autoRefresh) {
+      interval = window.setInterval(() => {
+        void loadProposals(false);
+      }, 15000);
+    }
+
     return () => {
       isMounted = false;
+      if (interval) {
+        window.clearInterval(interval);
+      }
     };
-  }, [selectedDaoId]);
+  }, [selectedDaoId, autoRefresh]);
 
   const handleCreateProposal = async (): Promise<void> => {
     setCreateError(null);
@@ -317,11 +338,44 @@ export const DashboardProposalsPage = (): JSX.Element => {
           <a className="secondary-button" href={getRealmDetailUrl(selectedDao.realmAddress, selectedDao.network)} target="_blank" rel="noreferrer">
             Open DAO in Realms
           </a>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => {
+              if (!selectedDaoId) return;
+              setIsLoadingProposals(true);
+              void getDaoProposals(selectedDaoId, { limit: 100 })
+                .then((items) => {
+                  setProposals(items);
+                  setLastRefreshedAt(new Date().toISOString());
+                  setError(null);
+                })
+                .catch((refreshError) => {
+                  setError(refreshError instanceof Error ? refreshError.message : 'Unable to refresh proposals');
+                })
+                .finally(() => setIsLoadingProposals(false));
+            }}
+          >
+            Refresh
+          </button>
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(event) => setAutoRefresh(event.target.checked)}
+            />
+            Auto refresh
+          </label>
         </div>
       ) : null}
 
       {createSuccess ? <p className="success-text">{createSuccess}</p> : null}
       {createError ? <p className="error-text">{createError}</p> : null}
+      {!isLoading && !error ? (
+        <p className="hint-text">
+          {lastRefreshedAt ? `Last refreshed: ${formatDateTime(lastRefreshedAt)}` : 'No refresh yet'}
+        </p>
+      ) : null}
 
       {isLoading ? <LoadingState message="Loading proposals..." /> : null}
       {!isLoading && error ? <ErrorState message={error} /> : null}
@@ -356,6 +410,7 @@ export const DashboardProposalsPage = (): JSX.Element => {
               <tr>
                 <th>Title</th>
                 <th>State</th>
+                <th>Source</th>
                 <th>Risk</th>
                 <th>Vote scope</th>
                 <th>Voting ends</th>
@@ -368,6 +423,14 @@ export const DashboardProposalsPage = (): JSX.Element => {
                 <tr key={proposal.id}>
                   <td>{proposal.title}</td>
                   <td>{stateChip(proposal.state)}</td>
+                  <td>
+                    <span className={`status-chip ${proposal.onchainExecution.proposalAddress ? 'status-chip--green' : 'status-chip--gray'}`}>
+                      {proposal.onchainExecution.proposalAddress ? 'On-chain' : 'Internal'}
+                    </span>
+                    {proposal.onchainExecution.proposalAddress ? (
+                      <p className="hint-text">{shortAddress(proposal.onchainExecution.proposalAddress)}</p>
+                    ) : null}
+                  </td>
                   <td>{riskChip(proposal.riskLevel, proposal.riskScore)}</td>
                   <td>
                     <span className="status-chip status-chip--gray">{proposal.voteScope}</span>
