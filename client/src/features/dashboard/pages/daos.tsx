@@ -141,6 +141,7 @@ export const DashboardDaosPage = (): JSX.Element => {
   const [isImporting, setIsImporting] = useState(false);
   const [isCreatingOnchain, setIsCreatingOnchain] = useState(false);
   const [isCreatingCommunityMint, setIsCreatingCommunityMint] = useState(false);
+  const [isCommunityMintModalOpen, setIsCommunityMintModalOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
@@ -163,6 +164,9 @@ export const DashboardDaosPage = (): JSX.Element => {
   const [onchainAuthorityWallet, setOnchainAuthorityWallet] = useState('');
   const [onchainCommunityMint, setOnchainCommunityMint] = useState('');
   const [onchainCouncilMint, setOnchainCouncilMint] = useState('');
+  const [mintTokenName, setMintTokenName] = useState('');
+  const [mintDecimals, setMintDecimals] = useState('6');
+  const [mintAuthorityWallet, setMintAuthorityWallet] = useState('');
 
   const loadDaos = async (): Promise<void> => {
     setIsLoading(true);
@@ -199,6 +203,7 @@ export const DashboardDaosPage = (): JSX.Element => {
 
         setImportAuthorityWallet(profile.walletAddress);
         setOnchainAuthorityWallet(profile.walletAddress);
+        setMintAuthorityWallet(profile.walletAddress);
       } catch {
         // no-op: DAO form can still be filled manually
       }
@@ -337,8 +342,15 @@ export const DashboardDaosPage = (): JSX.Element => {
       return;
     }
 
-    if (!onchainName.trim()) {
-      setOnchainError('DAO name is required to generate a token symbol and mint.');
+    const parsedDecimals = Number(mintDecimals.trim());
+
+    if (!mintTokenName.trim()) {
+      setOnchainError('Token name is required to generate a community mint.');
+      return;
+    }
+
+    if (!Number.isInteger(parsedDecimals) || parsedDecimals < 0 || parsedDecimals > 9) {
+      setOnchainError('Decimals must be an integer between 0 and 9.');
       return;
     }
 
@@ -360,10 +372,10 @@ export const DashboardDaosPage = (): JSX.Element => {
 
       const prepared = await prepareCommunityMint(
         {
-          name: onchainName.trim(),
+          name: mintTokenName.trim(),
           network: onchainNetwork,
-          authorityWallet: onchainAuthorityWallet.trim() || undefined,
-          decimals: 6,
+          authorityWallet: mintAuthorityWallet.trim() || undefined,
+          decimals: parsedDecimals,
         },
         session.accessToken,
       );
@@ -379,16 +391,26 @@ export const DashboardDaosPage = (): JSX.Element => {
       );
 
       setOnchainAuthorityWallet(prepared.authorityWallet);
+      setMintAuthorityWallet(prepared.authorityWallet);
       setOnchainCommunityMint(prepared.mintAddress);
       setImportCommunityMint(prepared.mintAddress);
       setOnchainSuccess(
         `Community mint created (${prepared.symbol}) ${prepared.mintAddress.slice(0, 8)}... Tx: ${signature.slice(0, 12)}...`,
       );
+      setIsCommunityMintModalOpen(false);
     } catch (createMintError) {
       setOnchainError(createMintError instanceof Error ? createMintError.message : 'Unable to create community mint');
     } finally {
       setIsCreatingCommunityMint(false);
     }
+  };
+
+  const openCommunityMintModal = (): void => {
+    setOnchainError(null);
+    setMintTokenName((current) => current || onchainName.trim());
+    setMintAuthorityWallet((current) => current || onchainAuthorityWallet.trim());
+    setMintDecimals((current) => current || '6');
+    setIsCommunityMintModalOpen(true);
   };
 
   return (
@@ -455,7 +477,7 @@ export const DashboardDaosPage = (): JSX.Element => {
               className="secondary-button"
               disabled={isImporting || isCreatingOnchain || isCreatingCommunityMint}
               onClick={() => {
-                void handleCreateCommunityMint();
+                openCommunityMintModal();
               }}
             >
               {isCreatingCommunityMint ? 'Generating Community Mint...' : 'Generate Community Mint'}
@@ -543,6 +565,70 @@ export const DashboardDaosPage = (): JSX.Element => {
           </form>
         )}
       </article>
+
+      {isCommunityMintModalOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Generate Community Mint">
+          <form
+            className="modal-card auth-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleCreateCommunityMint();
+            }}
+          >
+            <h3>Generate Community Mint</h3>
+            <p>Create a governance token mint with your wallet signature. This mint address will auto-fill Community Mint.</p>
+
+            <label className="input-label">
+              Token Name
+              <input
+                className="text-input"
+                value={mintTokenName}
+                onChange={(event) => setMintTokenName(event.target.value)}
+                minLength={2}
+                maxLength={120}
+                required
+              />
+            </label>
+
+            <label className="input-label">
+              Decimals
+              <input
+                className="text-input"
+                type="number"
+                min={0}
+                max={9}
+                value={mintDecimals}
+                onChange={(event) => setMintDecimals(event.target.value)}
+                required
+              />
+            </label>
+
+            <label className="input-label">
+              Mint Authority Wallet
+              <input
+                className="text-input"
+                value={mintAuthorityWallet}
+                onChange={(event) => setMintAuthorityWallet(event.target.value)}
+                required
+              />
+            </label>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={isCreatingCommunityMint}
+                onClick={() => setIsCommunityMintModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="primary-button" disabled={isCreatingCommunityMint}>
+                {isCreatingCommunityMint ? 'Generating...' : 'Create Mint'}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
 
       {isLoading ? <LoadingState message="Loading DAOs..." /> : null}
       {!isLoading && error ? <ErrorState message={error} /> : null}
