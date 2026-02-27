@@ -765,6 +765,21 @@ p {
   outline: none;
 }
 
+.input-with-action {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.input-with-action .text-input {
+  flex: 1;
+}
+
+.input-with-action .secondary-button {
+  white-space: nowrap;
+  padding: 0.6rem 0.8rem;
+}
+
 .text-input:focus {
   outline: 3px solid var(--black);
   outline-offset: 1px;

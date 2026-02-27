@@ -529,19 +529,20 @@ export const DashboardDaosPage = (): JSX.Element => {
 
             <label className="input-label">
               Community Mint
-              <input className="text-input" value={onchainCommunityMint} onChange={(event) => setOnchainCommunityMint(event.target.value)} required />
+              <div className="input-with-action">
+                <input className="text-input" value={onchainCommunityMint} onChange={(event) => setOnchainCommunityMint(event.target.value)} required />
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={isImporting || isCreatingOnchain || isCreatingCommunityMint}
+                  onClick={() => {
+                    openCommunityMintModal();
+                  }}
+                >
+                  {isCreatingCommunityMint ? 'Generating...' : 'Generate'}
+                </button>
+              </div>
             </label>
-
-            <button
-              type="button"
-              className="secondary-button"
-              disabled={isImporting || isCreatingOnchain || isCreatingCommunityMint}
-              onClick={() => {
-                openCommunityMintModal();
-              }}
-            >
-              {isCreatingCommunityMint ? 'Generating Community Mint...' : 'Generate Community Mint'}
-            </button>
 
             <label className="input-label">
               Council Mint (optional)
