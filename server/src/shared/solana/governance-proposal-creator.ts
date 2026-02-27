@@ -442,7 +442,7 @@ const toRuntimeInstruction = async (
   }
 
   if (instruction.kind === 'custom') {
-    if (!instruction.dataBase64) {
+    if (instruction.dataBase64 === null || instruction.dataBase64 === undefined) {
       throw new AppError('Custom instruction dataBase64 is required for onchain creation', 400, 'ONCHAIN_CUSTOM_DATA_MISSING');
     }
 

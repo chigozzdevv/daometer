@@ -56,6 +56,15 @@ export interface ProgramUpgradeBlock extends FlowBlockBase {
   spillAddress: string;
 }
 
+export interface CreateTokenAccountBlock extends FlowBlockBase {
+  type: 'create-token-account';
+  payer: string;
+  owner: string;
+  mint: string;
+  tokenProgramId?: string;
+  associatedTokenProgramId?: string;
+}
+
 export interface CreateStreamBlock extends FlowBlockBase {
   type: 'create-stream';
   streamProgramId: string;
@@ -91,6 +100,7 @@ export type FlowBlock =
   | TransferSplBlock
   | SetGovernanceConfigBlock
   | ProgramUpgradeBlock
+  | CreateTokenAccountBlock
   | CreateStreamBlock
   | CustomInstructionBlock;
 

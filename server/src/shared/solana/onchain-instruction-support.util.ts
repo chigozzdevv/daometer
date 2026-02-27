@@ -20,7 +20,7 @@ const parsePayload = (instruction: ProposalInstruction): Record<string, unknown>
 
 const checkInstruction = (instruction: ProposalInstruction): SupportedInstructionCheck => {
   if (instruction.kind === 'custom') {
-    if (!instruction.dataBase64) {
+    if (instruction.dataBase64 === null || instruction.dataBase64 === undefined) {
       return {
         supported: false,
         reason: 'Custom instruction requires dataBase64',

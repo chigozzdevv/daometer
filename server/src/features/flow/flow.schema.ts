@@ -42,6 +42,15 @@ const programUpgradeBlockSchema = blockBaseSchema.extend({
   spillAddress: z.string().trim().regex(base58Regex),
 });
 
+const createTokenAccountBlockSchema = blockBaseSchema.extend({
+  type: z.literal('create-token-account'),
+  payer: z.string().trim().regex(base58Regex),
+  owner: z.string().trim().regex(base58Regex),
+  mint: z.string().trim().regex(base58Regex),
+  tokenProgramId: z.string().trim().regex(base58Regex).optional(),
+  associatedTokenProgramId: z.string().trim().regex(base58Regex).optional(),
+});
+
 const createStreamBlockSchema = blockBaseSchema.extend({
   type: z.literal('create-stream'),
   streamProgramId: z.string().trim().regex(base58Regex),
@@ -86,6 +95,7 @@ const flowBlockSchema = z.discriminatedUnion('type', [
   transferSplBlockSchema,
   setGovernanceConfigBlockSchema,
   programUpgradeBlockSchema,
+  createTokenAccountBlockSchema,
   createStreamBlockSchema,
   customInstructionBlockSchema,
 ]);

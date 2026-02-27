@@ -1,4 +1,5 @@
 import { SOLANA_PROGRAM_IDS } from '@/config/solana.config';
+import { PublicKey } from '@solana/web3.js';
 import type {
   CompiledFlowInstruction,
   FlowBlock,
@@ -8,6 +9,7 @@ import type {
   TransferSplBlock,
   SetGovernanceConfigBlock,
   ProgramUpgradeBlock,
+  CreateTokenAccountBlock,
   CreateStreamBlock,
   CustomInstructionBlock,
 } from '@/features/flow/flow.types';
@@ -223,6 +225,66 @@ const compileProgramUpgrade = (block: ProgramUpgradeBlock, index: number): Compi
   };
 };
 
+const compileCreateTokenAccount = (block: CreateTokenAccountBlock, index: number): CompiledFlowInstruction => {
+  let riskScore = 22;
+  const warnings: string[] = [];
+
+  const tokenProgramId = block.tokenProgramId ?? SOLANA_PROGRAM_IDS.tokenProgram;
+  const associatedTokenProgramId = block.associatedTokenProgramId ?? SOLANA_PROGRAM_IDS.associatedTokenProgram;
+
+  let ataAddress: string | null = null;
+
+  try {
+    const owner = new PublicKey(block.owner);
+    const mint = new PublicKey(block.mint);
+    const tokenProgram = new PublicKey(tokenProgramId);
+    const associatedProgram = new PublicKey(associatedTokenProgramId);
+    ataAddress = PublicKey.findProgramAddressSync(
+      [owner.toBuffer(), tokenProgram.toBuffer(), mint.toBuffer()],
+      associatedProgram,
+    )[0].toBase58();
+  } catch {
+    riskScore = 100;
+    warnings.push('Unable to derive associated token account address from provided keys');
+  }
+
+  if (block.payer !== block.owner) {
+    riskScore += 8;
+    warnings.push('Payer differs from owner. Ensure payer is expected to fund ATA creation');
+  }
+
+  const cappedRisk = Math.min(100, riskScore);
+
+  return {
+    index,
+    kind: 'custom',
+    label: block.label,
+    programId: associatedTokenProgramId,
+    accounts: [
+      block.payer,
+      ataAddress ?? block.owner,
+      block.owner,
+      block.mint,
+      SOLANA_PROGRAM_IDS.systemProgram,
+      tokenProgramId,
+      SOLANA_PROGRAM_IDS.rentSysvar,
+    ],
+    accountMetas: [
+      { pubkey: block.payer, isSigner: true, isWritable: true },
+      { pubkey: ataAddress ?? block.owner, isSigner: false, isWritable: true },
+      { pubkey: block.owner, isSigner: false, isWritable: false },
+      { pubkey: block.mint, isSigner: false, isWritable: false },
+      { pubkey: SOLANA_PROGRAM_IDS.systemProgram, isSigner: false, isWritable: false },
+      { pubkey: tokenProgramId, isSigner: false, isWritable: false },
+      { pubkey: SOLANA_PROGRAM_IDS.rentSysvar, isSigner: false, isWritable: false },
+    ],
+    dataBase64: '',
+    riskScore: cappedRisk,
+    riskLevel: toRiskLevel(cappedRisk),
+    warnings,
+  };
+};
+
 const compileCreateStream = (block: CreateStreamBlock, index: number): CompiledFlowInstruction => {
   let riskScore = 28;
   const warnings: string[] = [];
@@ -323,6 +385,10 @@ const compileBlock = (block: FlowBlock, index: number, context: FlowCompileConte
 
   if (block.type === 'program-upgrade') {
     return compileProgramUpgrade(block, index);
+  }
+
+  if (block.type === 'create-token-account') {
+    return compileCreateTokenAccount(block, index);
   }
 
   if (block.type === 'create-stream') {

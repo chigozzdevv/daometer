@@ -29,6 +29,7 @@ type SupportedBlockType =
   | 'transfer-spl'
   | 'set-governance-config'
   | 'program-upgrade'
+  | 'create-token-account'
   | 'create-stream'
   | 'custom-instruction';
 
@@ -37,6 +38,7 @@ const supportedBlockTypes: Array<{ value: SupportedBlockType; label: string }> =
   { value: 'transfer-spl', label: 'Transfer SPL' },
   { value: 'set-governance-config', label: 'Set Governance Config' },
   { value: 'program-upgrade', label: 'Program Upgrade' },
+  { value: 'create-token-account', label: 'Create Token Account' },
   { value: 'create-stream', label: 'Create Stream' },
   { value: 'custom-instruction', label: 'Custom Instruction' },
 ];
@@ -105,6 +107,17 @@ const defaultBlockForType = (type: SupportedBlockType): FlowBlockInput => {
       programId: PLACEHOLDER_PUBKEY,
       bufferAddress: PLACEHOLDER_PUBKEY,
       spillAddress: PLACEHOLDER_PUBKEY,
+    };
+  }
+
+  if (type === 'create-token-account') {
+    return {
+      id: makeBlockId(),
+      type,
+      label: 'Create token account',
+      payer: PLACEHOLDER_PUBKEY,
+      owner: PLACEHOLDER_PUBKEY,
+      mint: PLACEHOLDER_PUBKEY,
     };
   }
 
@@ -625,6 +638,14 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
         };
       }
 
+      if (type === 'create-token-account') {
+        return {
+          ...block,
+          type,
+          label: getString(block.label, 'Create token account'),
+        };
+      }
+
       if (type === 'create-stream') {
         return {
           ...block,
@@ -1035,6 +1056,25 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
           <label className="input-label">
             Spill address
             <input className="text-input" value={getString(block.spillAddress)} onChange={(event) => setBlockField(blockId, 'spillAddress', event.target.value)} />
+          </label>
+        </div>
+      );
+    }
+
+    if (type === 'create-token-account') {
+      return (
+        <div className="form-grid two-col">
+          <label className="input-label">
+            Payer (signer)
+            <input className="text-input" value={getString(block.payer)} onChange={(event) => setBlockField(blockId, 'payer', event.target.value)} />
+          </label>
+          <label className="input-label">
+            Owner
+            <input className="text-input" value={getString(block.owner)} onChange={(event) => setBlockField(blockId, 'owner', event.target.value)} />
+          </label>
+          <label className="input-label">
+            Token mint
+            <input className="text-input" value={getString(block.mint)} onChange={(event) => setBlockField(blockId, 'mint', event.target.value)} />
           </label>
         </div>
       );
