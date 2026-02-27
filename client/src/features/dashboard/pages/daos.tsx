@@ -608,6 +608,21 @@ export const DashboardDaosPage = (): JSX.Element => {
         `On-chain Realm created (${prepared.realmAddress.slice(0, 8)}...) tx ${signature.slice(0, 12)}...${governanceResultSummary}`,
       );
     } catch (createDaoError) {
+      const createDaoErrorMessage =
+        createDaoError instanceof Error ? createDaoError.message : 'Unable to create on-chain DAO';
+      const isRealmAlreadyExistsError =
+        createDaoErrorMessage.includes('Realm with the given name and governing mints already exists') ||
+        createDaoErrorMessage.includes('custom program error: 0x1f5');
+
+      if (isRealmAlreadyExistsError) {
+        setOnchainFieldErrors((current) => ({
+          ...current,
+          name: 'Realm name already exists on this governance program. Use a different DAO name.',
+        }));
+        setOnchainError('DAO name is already used on this governance program. Change the name and try again.');
+        return;
+      }
+
       const fieldErrors = toFieldErrors(createDaoError);
       const validationFieldErrors: FieldErrors<OnchainFieldErrorKey> = {};
 
@@ -631,7 +646,7 @@ export const DashboardDaosPage = (): JSX.Element => {
         setOnchainFieldErrors(validationFieldErrors);
       }
 
-      setOnchainError(createDaoError instanceof Error ? createDaoError.message : 'Unable to create on-chain DAO');
+      setOnchainError(createDaoErrorMessage);
     } finally {
       setIsCreatingOnchain(false);
     }

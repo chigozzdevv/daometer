@@ -428,6 +428,21 @@ export const prepareDaoOnchainCreate = async (
     new BN(1),
   );
 
+  const existingRealmAccount = await connection.getAccountInfo(realmAddress, env.SOLANA_COMMITMENT as Commitment);
+
+  if (existingRealmAccount) {
+    throw new AppError(
+      'Realm name already exists on this governance program. Use a different DAO name.',
+      409,
+      'DAO_REALM_ALREADY_EXISTS',
+      {
+        fieldErrors: {
+          name: ['Realm name already exists on this governance program. Use a different DAO name.'],
+        },
+      },
+    );
+  }
+
   const transaction = new Transaction().add(...instructions);
   transaction.feePayer = feePayer;
   const latestBlockhash = await connection.getLatestBlockhash(env.SOLANA_COMMITMENT as Commitment);
