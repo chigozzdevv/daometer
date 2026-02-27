@@ -1361,7 +1361,15 @@ p {
 .flow-step-head {
   display: flex;
   align-items: flex-start;
+  justify-content: space-between;
   gap: 0.75rem;
+}
+
+.flow-step-head-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-width: 0;
 }
 
 .flow-step-head h2 {
@@ -1430,6 +1438,12 @@ p {
   flex-wrap: wrap;
 }
 
+.flow-builder-save-meta {
+  margin-left: auto;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .editor-header h2 {
   font-size: 1.05rem;
   font-weight: 800;
@@ -1483,12 +1497,21 @@ p {
   gap: 0.5rem;
 }
 
-.flow-canvas-board {
+.flow-canvas-shell {
   border: var(--border);
   background: var(--bg);
-  position: relative;
   width: 100%;
+  height: 82vh;
   min-height: 760px;
+  max-height: 960px;
+  overflow: auto;
+}
+
+.flow-canvas-board {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+  background: var(--bg);
   overflow: visible;
 }
 
@@ -1765,8 +1788,23 @@ p {
     flex-direction: column;
   }
 
-  .flow-canvas-board {
+  .flow-step-head-main {
+    width: 100%;
+  }
+
+  .flow-builder-save-meta {
+    margin-left: 0;
+    text-align: left;
+    white-space: normal;
+  }
+
+  .flow-canvas-shell {
+    height: 70vh;
     min-height: 560px;
+  }
+
+  .flow-canvas-board {
+    min-height: 100%;
   }
 
   .flow-canvas-node {

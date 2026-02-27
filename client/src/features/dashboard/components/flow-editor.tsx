@@ -1331,18 +1331,17 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
       {activeStep === 'builder' ? (
         <article className="flow-step-card">
           <header className="flow-step-head">
-            <span className="flow-step-index">Builder</span>
-            <div>
-              <h2>{flowName}</h2>
-              <p>{flowDescription || 'No description'}</p>
+            <div className="flow-step-head-main">
+              <span className="flow-step-index">Builder</span>
+              <div>
+                <h2>{flowName}</h2>
+                <p>{flowDescription || 'No description'}</p>
+              </div>
             </div>
-          </header>
-
-          <div className="flow-builder-status-row">
-            <span className="hint-text">
+            <span className="hint-text flow-builder-save-meta">
               {lastSavedAt ? `${saveStateLabel} • ${formatDateTime(lastSavedAt)}` : `${saveStateLabel} • Not saved yet`}
             </span>
-          </div>
+          </header>
 
           <div className="flow-palette">
             {supportedBlockTypes.map((typeItem) => (
@@ -1360,104 +1359,106 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
           {orderingPreview.error ? <p className="error-text">{orderingPreview.error}</p> : null}
           <p className="hint-text">Drag from empty block area. Resize from bottom-right corner.</p>
 
-          <div
-            className="flow-canvas-board"
-            ref={canvasRef}
-            style={{ minWidth: `${canvasSize.width}px`, height: `${canvasSize.height}px` }}
-          >
-            <svg className="flow-canvas-svg" aria-hidden="true">
-              {edgePaths.map((edge) => (
-                <path key={edge.id} d={edge.path} />
-              ))}
-            </svg>
+          <div className="flow-canvas-shell">
+            <div
+              className="flow-canvas-board"
+              ref={canvasRef}
+              style={{ width: `${canvasSize.width}px`, height: `${canvasSize.height}px` }}
+            >
+              <svg className="flow-canvas-svg" aria-hidden="true">
+                {edgePaths.map((edge) => (
+                  <path key={edge.id} d={edge.path} />
+                ))}
+              </svg>
 
-            {blocks.map((block) => {
-              const blockId = getString(block.id, makeBlockId());
-              const blockType = getString(block.type, 'transfer-sol') as SupportedBlockType;
-              const node = graphNodeMap.get(blockId);
-              const orderIndex = orderingPreview.ids.findIndex((id) => id === blockId) + 1;
+              {blocks.map((block) => {
+                const blockId = getString(block.id, makeBlockId());
+                const blockType = getString(block.type, 'transfer-sol') as SupportedBlockType;
+                const node = graphNodeMap.get(blockId);
+                const orderIndex = orderingPreview.ids.findIndex((id) => id === blockId) + 1;
 
-              if (!node) {
-                return null;
-              }
+                if (!node) {
+                  return null;
+                }
 
-              return (
-                <article
-                  key={blockId}
-                  className="flow-canvas-node"
-                  style={{ left: `${node.x}px`, top: `${node.y}px`, width: `${getNodeWidth(blockId)}px` }}
-                  onMouseDown={(event) => startNodeDrag(event, blockId)}
-                >
-                  <div className="flow-node-header">
-                    <div className="flow-node-title">
-                      <span className="status-chip status-chip--gray">#{orderIndex > 0 ? orderIndex : '-'}</span>
-                      <strong>{getString(block.label, 'Untitled block')}</strong>
+                return (
+                  <article
+                    key={blockId}
+                    className="flow-canvas-node"
+                    style={{ left: `${node.x}px`, top: `${node.y}px`, width: `${getNodeWidth(blockId)}px` }}
+                    onMouseDown={(event) => startNodeDrag(event, blockId)}
+                  >
+                    <div className="flow-node-header">
+                      <div className="flow-node-title">
+                        <span className="status-chip status-chip--gray">#{orderIndex > 0 ? orderIndex : '-'}</span>
+                        <strong>{getString(block.label, 'Untitled block')}</strong>
+                      </div>
+
+                      <div className="flow-node-actions">
+                        <button type="button" className="secondary-button flow-node-mini" onClick={() => removeBlock(blockId)}>
+                          Remove
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="flow-node-actions">
-                      <button type="button" className="secondary-button flow-node-mini" onClick={() => removeBlock(blockId)}>
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flow-link-row">
-                    <button
-                      type="button"
-                      className={`secondary-button flow-node-mini ${pendingLinkSourceId === blockId ? 'flow-link-active' : ''}`}
-                      onClick={() => setPendingLinkSourceId((current) => (current === blockId ? null : blockId))}
-                    >
-                      {pendingLinkSourceId === blockId ? 'Linking...' : 'Start link'}
-                    </button>
-
-                    {pendingLinkSourceId && pendingLinkSourceId !== blockId ? (
+                    <div className="flow-link-row">
                       <button
                         type="button"
-                        className="secondary-button flow-node-mini"
-                        onClick={() => connectNodes(pendingLinkSourceId, blockId)}
+                        className={`secondary-button flow-node-mini ${pendingLinkSourceId === blockId ? 'flow-link-active' : ''}`}
+                        onClick={() => setPendingLinkSourceId((current) => (current === blockId ? null : blockId))}
                       >
-                        Link here
+                        {pendingLinkSourceId === blockId ? 'Linking...' : 'Start link'}
                       </button>
-                    ) : null}
-                  </div>
 
-                  <div className="form-grid two-col">
-                    <label className="input-label">
-                      Label
-                      <input
-                        className="text-input"
-                        value={getString(block.label)}
-                        onChange={(event) => setBlockField(blockId, 'label', event.target.value)}
-                      />
-                    </label>
-                    <label className="input-label">
-                      Type
-                      <select
-                        className="select-input"
-                        value={blockType}
-                        onChange={(event) => changeBlockType(blockId, event.target.value as SupportedBlockType)}
-                      >
-                        {supportedBlockTypes.map((typeItem) => (
-                          <option key={typeItem.value} value={typeItem.value}>
-                            {typeItem.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
+                      {pendingLinkSourceId && pendingLinkSourceId !== blockId ? (
+                        <button
+                          type="button"
+                          className="secondary-button flow-node-mini"
+                          onClick={() => connectNodes(pendingLinkSourceId, blockId)}
+                        >
+                          Link here
+                        </button>
+                      ) : null}
+                    </div>
 
-                  {renderNodeFields(block)}
+                    <div className="form-grid two-col">
+                      <label className="input-label">
+                        Label
+                        <input
+                          className="text-input"
+                          value={getString(block.label)}
+                          onChange={(event) => setBlockField(blockId, 'label', event.target.value)}
+                        />
+                      </label>
+                      <label className="input-label">
+                        Type
+                        <select
+                          className="select-input"
+                          value={blockType}
+                          onChange={(event) => changeBlockType(blockId, event.target.value as SupportedBlockType)}
+                        >
+                          {supportedBlockTypes.map((typeItem) => (
+                            <option key={typeItem.value} value={typeItem.value}>
+                              {typeItem.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
 
-                  <button
-                    type="button"
-                    className="flow-node-resize-handle"
-                    onMouseDown={(event) => startNodeResize(event, blockId)}
-                    aria-label="Resize block"
-                    title="Resize block"
-                  />
-                </article>
-              );
-            })}
+                    {renderNodeFields(block)}
+
+                    <button
+                      type="button"
+                      className="flow-node-resize-handle"
+                      onMouseDown={(event) => startNodeResize(event, blockId)}
+                      aria-label="Resize block"
+                      title="Resize block"
+                    />
+                  </article>
+                );
+              })}
+            </div>
           </div>
 
           {graphEdges.length > 0 ? (
