@@ -14,16 +14,11 @@ import {
 import { formatDateTime } from '@/features/dashboard/lib/format';
 
 const canvasNodeHeight = 210;
+const defaultNodeWidth = 360;
+const minNodeWidth = 280;
+const maxNodeWidth = 560;
 const PLACEHOLDER_PUBKEY = '11111111111111111111111111111111';
 const PLACEHOLDER_BASE64 = 'AQ==';
-
-type NodeSizeOption = 'compact' | 'normal' | 'wide';
-
-const nodeWidthBySize: Record<NodeSizeOption, number> = {
-  compact: 300,
-  normal: 360,
-  wide: 420,
-};
 
 type SupportedBlockType =
   | 'transfer-sol'
@@ -326,21 +321,25 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
   const [blocks, setBlocks] = useState<FlowBlockInput[]>([]);
   const [graphNodes, setGraphNodes] = useState<FlowGraphNode[]>([]);
   const [graphEdges, setGraphEdges] = useState<FlowGraphEdge[]>([]);
-  const [nodeSize, setNodeSize] = useState<NodeSizeOption>('normal');
+  const [nodeWidths, setNodeWidths] = useState<Record<string, number>>({});
   const [pendingLinkSourceId, setPendingLinkSourceId] = useState<string | null>(null);
   const [draggingNode, setDraggingNode] = useState<{
     nodeId: string;
     offsetX: number;
     offsetY: number;
   } | null>(null);
+  const [resizingNode, setResizingNode] = useState<{
+    nodeId: string;
+    startClientX: number;
+    startWidth: number;
+  } | null>(null);
 
   const [compileContextJson, setCompileContextJson] = useState('{}');
   const [compileResult, setCompileResult] = useState<FlowCompilationResult | null>(null);
   const [lastPublishResult, setLastPublishResult] = useState<PublishFlowResult | null>(null);
 
-  const nodeWidth = nodeWidthBySize[nodeSize];
-
   const graphNodeMap = useMemo(() => new Map(graphNodes.map((node) => [node.id, node])), [graphNodes]);
+  const getNodeWidth = (nodeId: string): number => nodeWidths[nodeId] ?? defaultNodeWidth;
 
   const orderingPreview = useMemo(() => {
     try {
@@ -367,7 +366,8 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
             return null;
           }
 
-          const startX = sourceNode.x + nodeWidth - 8;
+          const sourceWidth = getNodeWidth(sourceNode.id);
+          const startX = sourceNode.x + sourceWidth - 8;
           const startY = sourceNode.y + 58;
           const endX = targetNode.x + 8;
           const endY = targetNode.y + 58;
@@ -381,7 +381,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
           };
         })
         .filter((item): item is { id: string; path: string } => Boolean(item)),
-    [graphEdges, graphNodeMap, nodeWidth],
+    [graphEdges, graphNodeMap, nodeWidths],
   );
 
   const markDirty = (): void => {
@@ -412,6 +412,9 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
       setBlocks(loadedBlocks);
       setGraphNodes(normalizedGraph.nodes);
       setGraphEdges(normalizedGraph.edges);
+      setNodeWidths(
+        Object.fromEntries(normalizedGraph.nodes.map((node) => [node.id, defaultNodeWidth])),
+      );
       setPendingLinkSourceId(null);
       setIsDirty(false);
       setCompileResult(null);
@@ -444,7 +447,8 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
       }
 
       const rect = board.getBoundingClientRect();
-      const maxX = Math.max(8, rect.width - nodeWidth - 8);
+      const draggingWidth = getNodeWidth(draggingNode.nodeId);
+      const maxX = Math.max(8, rect.width - draggingWidth - 8);
       const maxY = Math.max(8, rect.height - canvasNodeHeight - 8);
       const nextX = clamp(event.clientX - rect.left - draggingNode.offsetX, 8, maxX);
       const nextY = clamp(event.clientY - rect.top - draggingNode.offsetY, 8, maxY);
@@ -475,7 +479,37 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
       window.removeEventListener('mouseup', handleUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draggingNode, nodeWidth]);
+  }, [draggingNode, nodeWidths]);
+
+  useEffect(() => {
+    if (!resizingNode) {
+      return;
+    }
+
+    const handleMove = (event: MouseEvent): void => {
+      const deltaX = event.clientX - resizingNode.startClientX;
+      const nextWidth = clamp(resizingNode.startWidth + deltaX, minNodeWidth, maxNodeWidth);
+
+      setNodeWidths((current) => ({
+        ...current,
+        [resizingNode.nodeId]: nextWidth,
+      }));
+      markDirty();
+    };
+
+    const handleUp = (): void => {
+      setResizingNode(null);
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resizingNode]);
 
   const normalizeBlocksForApi = (items: FlowBlockInput[]): FlowBlockInput[] =>
     items.map((block) => {
@@ -674,6 +708,10 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
       const position = getDefaultNodePosition(current.length);
       return [...current, { id: nextBlockId, x: position.x, y: position.y }];
     });
+    setNodeWidths((current) => ({
+      ...current,
+      [nextBlockId]: defaultNodeWidth,
+    }));
 
     markDirty();
   };
@@ -682,6 +720,11 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
     setBlocks((current) => current.filter((block) => getString(block.id) !== blockId));
     setGraphNodes((current) => current.filter((node) => node.id !== blockId));
     setGraphEdges((current) => current.filter((edge) => edge.source !== blockId && edge.target !== blockId));
+    setNodeWidths((current) => {
+      const next = { ...current };
+      delete next[blockId];
+      return next;
+    });
     setPendingLinkSourceId((current) => (current === blockId ? null : current));
     markDirty();
   };
@@ -744,8 +787,21 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
     markDirty();
   };
 
-  const startNodeDrag = (event: ReactMouseEvent<HTMLButtonElement>, nodeId: string): void => {
+  const isInteractiveTarget = (target: EventTarget | null): boolean => {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+
+    return Boolean(target.closest('input, textarea, select, button, a, label'));
+  };
+
+  const startNodeDrag = (event: ReactMouseEvent<HTMLElement>, nodeId: string): void => {
+    if (isInteractiveTarget(event.target)) {
+      return;
+    }
+
     event.preventDefault();
+
     const board = canvasRef.current;
     const node = graphNodeMap.get(nodeId);
 
@@ -758,6 +814,17 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
     const offsetY = event.clientY - rect.top - node.y;
 
     setDraggingNode({ nodeId, offsetX, offsetY });
+  };
+
+  const startNodeResize = (event: ReactMouseEvent<HTMLButtonElement>, nodeId: string): void => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    setResizingNode({
+      nodeId,
+      startClientX: event.clientX,
+      startWidth: getNodeWidth(nodeId),
+    });
   };
 
   const renderNodeFields = (block: FlowBlockInput): JSX.Element => {
@@ -935,14 +1002,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
         <div className="flow-builder-status-row">
           <span className="hint-text">{isAutoSaving ? 'Auto-saving...' : isDirty ? 'Unsaved changes' : 'Saved'}</span>
           <span className="hint-text">{lastSavedAt ? `Last saved: ${formatDateTime(lastSavedAt)}` : 'Not saved yet'}</span>
-          <label className="input-label flow-node-size-field">
-            Block size
-            <select className="select-input" value={nodeSize} onChange={(event) => setNodeSize(event.target.value as NodeSizeOption)}>
-              <option value="compact">Compact</option>
-              <option value="normal">Normal</option>
-              <option value="wide">Wide</option>
-            </select>
-          </label>
+          <span className="hint-text">Drag from empty block area. Resize from bottom-right corner.</span>
         </div>
 
         <div className="flow-palette">
@@ -984,7 +1044,8 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
               <article
                 key={blockId}
                 className="flow-canvas-node"
-                style={{ left: `${node.x}px`, top: `${node.y}px`, width: `${nodeWidth}px` }}
+                style={{ left: `${node.x}px`, top: `${node.y}px`, width: `${getNodeWidth(blockId)}px` }}
+                onMouseDown={(event) => startNodeDrag(event, blockId)}
               >
                 <div className="flow-node-header">
                   <div className="flow-node-title">
@@ -993,9 +1054,6 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
                   </div>
 
                   <div className="flow-node-actions">
-                    <button type="button" className="secondary-button flow-node-mini" onMouseDown={(event) => startNodeDrag(event, blockId)}>
-                      Drag
-                    </button>
                     <button type="button" className="secondary-button flow-node-mini" onClick={() => removeBlock(blockId)}>
                       Remove
                     </button>
@@ -1048,6 +1106,14 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
                 </div>
 
                 {renderNodeFields(block)}
+
+                <button
+                  type="button"
+                  className="flow-node-resize-handle"
+                  onMouseDown={(event) => startNodeResize(event, blockId)}
+                  aria-label="Resize block"
+                  title="Resize block"
+                />
               </article>
             );
           })}

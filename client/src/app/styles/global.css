@@ -1333,10 +1333,6 @@ p {
   flex-wrap: wrap;
 }
 
-.flow-node-size-field {
-  width: min(180px, 100%);
-}
-
 .editor-header h2 {
   font-size: 1.05rem;
   font-weight: 800;
@@ -1424,6 +1420,8 @@ p {
   display: grid;
   gap: 0.55rem;
   box-shadow: var(--shadow);
+  cursor: grab;
+  user-select: none;
 }
 
 .flow-node-header {
@@ -1449,6 +1447,14 @@ p {
   padding: 0.35rem 0.5rem;
   font-size: 0.72rem;
   box-shadow: none;
+}
+
+.flow-canvas-node input,
+.flow-canvas-node textarea,
+.flow-canvas-node select,
+.flow-canvas-node button {
+  user-select: text;
+  cursor: auto;
 }
 
 .flow-link-row {
@@ -1482,6 +1488,20 @@ p {
 
 .flow-edge-item span {
   overflow-wrap: anywhere;
+}
+
+.flow-canvas-node .flow-node-resize-handle {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 14px;
+  height: 14px;
+  border: var(--border);
+  background: var(--yellow);
+  box-shadow: none;
+  cursor: nwse-resize;
+  user-select: none;
+  padding: 0;
 }
 
 .subheading {
