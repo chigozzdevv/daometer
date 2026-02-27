@@ -11,6 +11,7 @@ export const createDaoSchema = z.object({
     network: z.enum(['mainnet-beta', 'devnet']).default('mainnet-beta'),
     realmAddress: z.string().trim().regex(base58Regex, 'Invalid realm address'),
     governanceProgramId: z.string().trim().regex(base58Regex, 'Invalid governance program id'),
+    defaultGovernanceAddress: z.string().trim().regex(base58Regex, 'Invalid default governance address').optional(),
     authorityWallet: z.string().trim().regex(base58Regex, 'Invalid authority wallet'),
     communityMint: z.string().trim().regex(base58Regex, 'Invalid community mint').optional(),
     councilMint: z.string().trim().regex(base58Regex, 'Invalid council mint').optional(),
@@ -59,6 +60,9 @@ export const updateDaoSchema = z.object({
     .object({
       name: z.string().trim().min(2).max(120).optional(),
       description: z.string().trim().max(2000).optional(),
+      defaultGovernanceAddress: z
+        .union([z.string().trim().regex(base58Regex, 'Invalid default governance address'), z.null()])
+        .optional(),
       automationConfig: z
         .object({
           autoExecuteEnabled: z.boolean().optional(),

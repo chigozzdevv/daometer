@@ -168,35 +168,6 @@ const onchainCreateConfigSchema = z
     signOff: z.boolean().default(true),
     requireSimulation: z.boolean().default(true),
   })
-  .superRefine((value, ctx) => {
-    if (!value.enabled) {
-      return;
-    }
-
-    if (!value.realmAddress) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['realmAddress'],
-        message: 'realmAddress is required when onchainCreate is enabled',
-      });
-    }
-
-    if (!value.governanceAddress) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['governanceAddress'],
-        message: 'governanceAddress is required when onchainCreate is enabled',
-      });
-    }
-
-    if (!value.governingTokenMint) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['governingTokenMint'],
-        message: 'governingTokenMint is required when onchainCreate is enabled',
-      });
-    }
-  })
   .optional();
 
 export const createFlowSchema = z.object({

@@ -366,10 +366,11 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
   const [publishGovernanceProgramId, setPublishGovernanceProgramId] = useState('');
   const [publishGovernanceAddress, setPublishGovernanceAddress] = useState('');
   const [publishGoverningTokenMint, setPublishGoverningTokenMint] = useState('');
+  const [publishUseGovernanceOverride, setPublishUseGovernanceOverride] = useState(false);
 
   const graphNodeMap = useMemo(() => new Map(graphNodes.map((node) => [node.id, node])), [graphNodes]);
   const selectedGovernance = useMemo(
-    () => governanceOptions.find((item) => item.address === publishGovernanceAddress) ?? governanceOptions[0] ?? null,
+    () => governanceOptions.find((item) => item.address === publishGovernanceAddress) ?? null,
     [governanceOptions, publishGovernanceAddress],
   );
   const getNodeWidth = (nodeId: string): number => nodeWidths[nodeId] ?? defaultNodeWidth;
@@ -497,12 +498,17 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
         setPublishRealmAddress(dao.realmAddress);
         setPublishGovernanceProgramId(dao.governanceProgramId);
         setPublishGoverningTokenMint(dao.communityMint ?? '');
-        setPublishGovernanceAddress((current) => {
-          if (current && governanceResponse.items.some((item) => item.address === current)) {
-            return current;
+        setPublishUseGovernanceOverride(false);
+        setPublishGovernanceAddress(() => {
+          if (dao.defaultGovernanceAddress) {
+            return dao.defaultGovernanceAddress;
           }
 
-          return governanceResponse.items[0]?.address ?? '';
+          if (governanceResponse.items.length === 1) {
+            return governanceResponse.items[0].address;
+          }
+
+          return '';
         });
       } catch (loadError) {
         if (!isMounted) {
@@ -790,11 +796,6 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
         return;
       }
 
-      if (!publishGovernanceAddress.trim()) {
-        setError('Governance account is required for on-chain publish.');
-        return;
-      }
-
       if (!publishGoverningTokenMint.trim()) {
         setError('Governing token mint is required for on-chain publish.');
         return;
@@ -818,11 +819,11 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
           ? {
               onchainCreate: {
                 enabled: true,
-                governanceProgramId: publishGovernanceProgramId.trim(),
+                governanceProgramId: publishGovernanceProgramId.trim() || undefined,
                 programVersion: 3,
-                realmAddress: publishRealmAddress.trim(),
-                governanceAddress: publishGovernanceAddress.trim(),
-                governingTokenMint: publishGoverningTokenMint.trim(),
+                realmAddress: publishRealmAddress.trim() || undefined,
+                governanceAddress: publishGovernanceAddress.trim() || undefined,
+                governingTokenMint: publishGoverningTokenMint.trim() || undefined,
                 optionIndex: 0,
                 useDenyOption: true,
                 signOff: true,
@@ -1280,7 +1281,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
             Governance: <code>{selectedGovernance.address}</code> | Native treasury: <code>{selectedGovernance.nativeTreasuryAddress}</code>
           </p>
         ) : (
-          <p className="hint-text">No governance selected yet. Go to Publish step and select a governance account.</p>
+          <p className="hint-text">No default governance configured yet. Set one on the DAO page.</p>
         )}
 
         <div className="flow-palette">
@@ -1526,23 +1527,57 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
             </label>
             <label className="input-label">
               Governance account
-              <select
-                className="select-input"
+              <input
+                className="text-input"
                 value={publishGovernanceAddress}
                 onChange={(event) => setPublishGovernanceAddress(event.target.value)}
-                disabled={isLoadingDaoContext || governanceOptions.length === 0}
-              >
-                {governanceOptions.length === 0 ? (
-                  <option value="">
-                    {isLoadingDaoContext ? 'Loading governance accounts...' : 'No governance accounts found'}
-                  </option>
-                ) : null}
-                {governanceOptions.map((item) => (
-                  <option key={item.address} value={item.address}>
-                    {item.address}
-                  </option>
-                ))}
-              </select>
+                readOnly={!publishUseGovernanceOverride}
+                placeholder={
+                  isLoadingDaoContext
+                    ? 'Loading governance accounts...'
+                    : 'Set DAO default governance to auto-fill'
+                }
+              />
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={publishUseGovernanceOverride}
+                  onChange={(event) => {
+                    const nextChecked = event.target.checked;
+                    setPublishUseGovernanceOverride(nextChecked);
+
+                    if (!nextChecked) {
+                      const defaultAddress =
+                        daoContext?.defaultGovernanceAddress ??
+                        (governanceOptions.length === 1 ? governanceOptions[0].address : '');
+                      setPublishGovernanceAddress(defaultAddress);
+                    } else if (!publishGovernanceAddress && governanceOptions[0]?.address) {
+                      setPublishGovernanceAddress(governanceOptions[0].address);
+                    }
+                  }}
+                  disabled={governanceOptions.length === 0}
+                />
+                Override governance account
+              </label>
+              {publishUseGovernanceOverride ? (
+                <select
+                  className="select-input"
+                  value={publishGovernanceAddress}
+                  onChange={(event) => setPublishGovernanceAddress(event.target.value)}
+                  disabled={isLoadingDaoContext || governanceOptions.length === 0}
+                >
+                  {governanceOptions.length === 0 ? (
+                    <option value="">
+                      {isLoadingDaoContext ? 'Loading governance accounts...' : 'No governance accounts found'}
+                    </option>
+                  ) : null}
+                  {governanceOptions.map((item) => (
+                    <option key={item.address} value={item.address}>
+                      {item.address}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
             </label>
             <label className="input-label">
               Governing token mint

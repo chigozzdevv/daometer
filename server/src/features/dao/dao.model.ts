@@ -13,6 +13,7 @@ export interface Dao {
   network: 'mainnet-beta' | 'devnet';
   realmAddress: string;
   governanceProgramId: string;
+  defaultGovernanceAddress: string | null;
   authorityWallet: string;
   communityMint: string | null;
   councilMint: string | null;
@@ -80,6 +81,11 @@ const daoSchema = new Schema<Dao>(
       type: String,
       required: true,
       trim: true,
+    },
+    defaultGovernanceAddress: {
+      type: String,
+      trim: true,
+      default: null,
     },
     authorityWallet: {
       type: String,

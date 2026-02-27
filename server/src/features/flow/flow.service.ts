@@ -2,6 +2,8 @@ import { Types } from 'mongoose';
 import { compileFlowBlocks } from '@/features/flow/flow.compiler';
 import { FlowModel, type FlowDocument } from '@/features/flow/flow.model';
 import type { FlowBlock, FlowCompileContext, FlowGraph, FlowProposalDefaults } from '@/features/flow/flow.types';
+import { DaoModel } from '@/features/dao/dao.model';
+import { listDaoGovernances } from '@/features/dao/dao.service';
 import { createProposal, createProposalOnchain, type CreateProposalInput } from '@/features/proposal/proposal.service';
 import { AppError } from '@/shared/errors/app-error';
 import { assertCanManageDao } from '@/shared/utils/authorization.util';
@@ -65,6 +67,61 @@ type PublishFlowInput = {
     rpcUrl?: string;
     signOff: boolean;
     requireSimulation: boolean;
+  };
+};
+
+const resolveOnchainCreateConfig = async (
+  flow: FlowDocument,
+  onchainCreate: NonNullable<PublishFlowInput['onchainCreate']>,
+): Promise<NonNullable<PublishFlowInput['onchainCreate']>> => {
+  const dao = await DaoModel.findById(flow.daoId).select(
+    'realmAddress governanceProgramId communityMint defaultGovernanceAddress',
+  );
+
+  if (!dao) {
+    throw new AppError('DAO not found', 404, 'DAO_NOT_FOUND');
+  }
+
+  const resolvedRealmAddress = onchainCreate.realmAddress?.trim() || dao.realmAddress;
+  const resolvedGovernanceProgramId = onchainCreate.governanceProgramId?.trim() || dao.governanceProgramId;
+  const resolvedGoverningTokenMint = onchainCreate.governingTokenMint?.trim() || dao.communityMint;
+  let resolvedGovernanceAddress =
+    onchainCreate.governanceAddress?.trim() || dao.defaultGovernanceAddress || null;
+
+  if (!resolvedGovernanceAddress) {
+    const governanceResult = await listDaoGovernances(flow.daoId.toString());
+
+    if (governanceResult.items.length === 1) {
+      resolvedGovernanceAddress = governanceResult.items[0].address;
+    } else if (governanceResult.items.length > 1) {
+      throw new AppError(
+        'Multiple governance accounts found. Set a default governance account on the DAO page.',
+        400,
+        'FLOW_GOVERNANCE_DEFAULT_REQUIRED',
+      );
+    } else {
+      throw new AppError(
+        'No governance account found for this DAO. Create one in Realms, then set it as default in DAO settings.',
+        400,
+        'FLOW_GOVERNANCE_NOT_FOUND',
+      );
+    }
+  }
+
+  if (!resolvedGoverningTokenMint) {
+    throw new AppError(
+      'Governing token mint is missing. Set community mint on DAO setup or pass governingTokenMint explicitly.',
+      400,
+      'FLOW_GOVERNING_TOKEN_MINT_MISSING',
+    );
+  }
+
+  return {
+    ...onchainCreate,
+    governanceProgramId: resolvedGovernanceProgramId,
+    realmAddress: resolvedRealmAddress,
+    governanceAddress: resolvedGovernanceAddress,
+    governingTokenMint: resolvedGoverningTokenMint,
   };
 };
 
@@ -289,10 +346,15 @@ export const publishFlow = async (
     ...flow.proposalDefaults,
   };
   const proposalAddress = input.proposalAddress ?? generateBase58String(44);
+  const resolvedOnchainCreate = input.onchainCreate?.enabled
+    ? await resolveOnchainCreateConfig(flow, input.onchainCreate)
+    : undefined;
 
   if (
-    input.onchainCreate?.enabled &&
-    (!input.onchainCreate.realmAddress || !input.onchainCreate.governanceAddress || !input.onchainCreate.governingTokenMint)
+    resolvedOnchainCreate?.enabled &&
+    (!resolvedOnchainCreate.realmAddress ||
+      !resolvedOnchainCreate.governanceAddress ||
+      !resolvedOnchainCreate.governingTokenMint)
   ) {
     throw new AppError(
       'realmAddress, governanceAddress and governingTokenMint are required for onchainCreate',
@@ -349,20 +411,20 @@ export const publishFlow = async (
     | undefined;
   let onchainCreationError: string | undefined;
 
-  if (input.onchainCreate?.enabled) {
+  if (resolvedOnchainCreate?.enabled) {
     try {
       const onchainResult = await createProposalOnchain(proposal.id, {
-        governanceProgramId: input.onchainCreate.governanceProgramId,
-        programVersion: input.onchainCreate.programVersion,
-        realmAddress: input.onchainCreate.realmAddress,
-        governanceAddress: input.onchainCreate.governanceAddress,
-        governingTokenMint: input.onchainCreate.governingTokenMint,
-        descriptionLink: input.onchainCreate.descriptionLink,
-        optionIndex: input.onchainCreate.optionIndex,
-        useDenyOption: input.onchainCreate.useDenyOption,
-        rpcUrl: input.onchainCreate.rpcUrl,
-        signOff: input.onchainCreate.signOff,
-        requireSimulation: input.onchainCreate.requireSimulation,
+        governanceProgramId: resolvedOnchainCreate.governanceProgramId,
+        programVersion: resolvedOnchainCreate.programVersion,
+        realmAddress: resolvedOnchainCreate.realmAddress,
+        governanceAddress: resolvedOnchainCreate.governanceAddress,
+        governingTokenMint: resolvedOnchainCreate.governingTokenMint,
+        descriptionLink: resolvedOnchainCreate.descriptionLink,
+        optionIndex: resolvedOnchainCreate.optionIndex,
+        useDenyOption: resolvedOnchainCreate.useDenyOption,
+        rpcUrl: resolvedOnchainCreate.rpcUrl,
+        signOff: resolvedOnchainCreate.signOff,
+        requireSimulation: resolvedOnchainCreate.requireSimulation,
       }, userId);
 
       onchainCreation = {

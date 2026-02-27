@@ -3,10 +3,13 @@ import { Transaction, VersionedTransaction } from '@solana/web3.js';
 import { useAuth } from '@/app/providers/auth-provider';
 import {
   createDao,
+  getDaoGovernances,
   getAuthProfile,
   getDaos,
   prepareCommunityMint,
   prepareDaoOnchainCreate,
+  updateDao,
+  type DaoGovernanceItem,
   type DaoItem,
 } from '@/features/dashboard/api/api';
 import { DashboardShell } from '@/features/dashboard/components/shell';
@@ -331,6 +334,11 @@ export const DashboardDaosPage = (): JSX.Element => {
   const [mintDecimals, setMintDecimals] = useState('6');
   const [mintAuthorityWallet, setMintAuthorityWallet] = useState('');
   const [mintFieldErrors, setMintFieldErrors] = useState<FieldErrors<MintFieldErrorKey>>({});
+  const [governancesByDao, setGovernancesByDao] = useState<Record<string, DaoGovernanceItem[]>>({});
+  const [governanceLoadingByDao, setGovernanceLoadingByDao] = useState<Record<string, boolean>>({});
+  const [governanceErrorByDao, setGovernanceErrorByDao] = useState<Record<string, string | null>>({});
+  const [selectedDefaultGovernanceByDao, setSelectedDefaultGovernanceByDao] = useState<Record<string, string>>({});
+  const [savingDefaultGovernanceByDao, setSavingDefaultGovernanceByDao] = useState<Record<string, boolean>>({});
 
   const loadDaos = async (): Promise<void> => {
     setIsLoading(true);
@@ -343,6 +351,62 @@ export const DashboardDaosPage = (): JSX.Element => {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load DAOs');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const loadGovernancesForDao = async (daoId: string): Promise<void> => {
+    setGovernanceLoadingByDao((current) => ({ ...current, [daoId]: true }));
+    setGovernanceErrorByDao((current) => ({ ...current, [daoId]: null }));
+
+    try {
+      const response = await getDaoGovernances(daoId);
+      setGovernancesByDao((current) => ({ ...current, [daoId]: response.items }));
+      setSelectedDefaultGovernanceByDao((current) => {
+        if (current[daoId]) {
+          return current;
+        }
+
+        return {
+          ...current,
+          [daoId]: response.items[0]?.address ?? '',
+        };
+      });
+    } catch (loadError) {
+      setGovernanceErrorByDao((current) => ({
+        ...current,
+        [daoId]: loadError instanceof Error ? loadError.message : 'Unable to load governance accounts',
+      }));
+    } finally {
+      setGovernanceLoadingByDao((current) => ({ ...current, [daoId]: false }));
+    }
+  };
+
+  const handleSetDefaultGovernance = async (dao: DaoItem, nextAddress: string | null): Promise<void> => {
+    if (!session?.accessToken) {
+      setError('You must be authenticated to update DAO governance settings.');
+      return;
+    }
+
+    setSavingDefaultGovernanceByDao((current) => ({ ...current, [dao.id]: true }));
+
+    try {
+      const updated = await updateDao(
+        dao.id,
+        {
+          defaultGovernanceAddress: nextAddress,
+        },
+        session.accessToken,
+      );
+
+      setDaos((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setSelectedDefaultGovernanceByDao((current) => ({
+        ...current,
+        [dao.id]: updated.defaultGovernanceAddress ?? current[dao.id] ?? '',
+      }));
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : 'Unable to update default governance');
+    } finally {
+      setSavingDefaultGovernanceByDao((current) => ({ ...current, [dao.id]: false }));
     }
   };
 
@@ -379,6 +443,20 @@ export const DashboardDaosPage = (): JSX.Element => {
       isMounted = false;
     };
   }, [session?.accessToken]);
+
+  useEffect(() => {
+    setSelectedDefaultGovernanceByDao((current) => {
+      const next = { ...current };
+
+      daos.forEach((dao) => {
+        if (!next[dao.id] && dao.defaultGovernanceAddress) {
+          next[dao.id] = dao.defaultGovernanceAddress;
+        }
+      });
+
+      return next;
+    });
+  }, [daos]);
 
   const handleImportDao = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
@@ -1133,6 +1211,76 @@ export const DashboardDaosPage = (): JSX.Element => {
                     {shortAddress(dao.authorityWallet, 6)}
                   </a>
                 </div>
+              </div>
+
+              <div className="dao-governance-config">
+                <div className="dao-governance-config-head">
+                  <span>Default governance account</span>
+                  {dao.defaultGovernanceAddress ? (
+                    <code title={dao.defaultGovernanceAddress}>{shortAddress(dao.defaultGovernanceAddress, 6)}</code>
+                  ) : (
+                    <span className="hint-text">Not set</span>
+                  )}
+                </div>
+
+                {governanceErrorByDao[dao.id] ? <p className="error-text">{governanceErrorByDao[dao.id]}</p> : null}
+
+                {governancesByDao[dao.id] ? (
+                  <div className="dao-governance-config-controls">
+                    <select
+                      className="select-input"
+                      value={selectedDefaultGovernanceByDao[dao.id] ?? ''}
+                      onChange={(event) =>
+                        setSelectedDefaultGovernanceByDao((current) => ({
+                          ...current,
+                          [dao.id]: event.target.value,
+                        }))
+                      }
+                      disabled={Boolean(savingDefaultGovernanceByDao[dao.id])}
+                    >
+                      {governancesByDao[dao.id].length === 0 ? (
+                        <option value="">No governance accounts found</option>
+                      ) : null}
+                      {governancesByDao[dao.id].map((item) => (
+                        <option key={item.address} value={item.address}>
+                          {item.address}
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={Boolean(savingDefaultGovernanceByDao[dao.id]) || !selectedDefaultGovernanceByDao[dao.id]}
+                      onClick={() => {
+                        void handleSetDefaultGovernance(dao, selectedDefaultGovernanceByDao[dao.id] || null);
+                      }}
+                    >
+                      {savingDefaultGovernanceByDao[dao.id] ? 'Saving...' : 'Set default'}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={Boolean(savingDefaultGovernanceByDao[dao.id])}
+                      onClick={() => {
+                        void handleSetDefaultGovernance(dao, null);
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      void loadGovernancesForDao(dao.id);
+                    }}
+                    disabled={Boolean(governanceLoadingByDao[dao.id])}
+                  >
+                    {governanceLoadingByDao[dao.id] ? 'Loading...' : 'Load governance accounts'}
+                  </button>
+                )}
               </div>
 
               <div className="dao-card-actions">

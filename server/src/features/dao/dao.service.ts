@@ -26,6 +26,7 @@ type CreateDaoInput = {
   network: 'mainnet-beta' | 'devnet';
   realmAddress: string;
   governanceProgramId: string;
+  defaultGovernanceAddress?: string;
   authorityWallet: string;
   communityMint?: string;
   councilMint?: string;
@@ -40,6 +41,7 @@ type CreateDaoInput = {
 type UpdateDaoInput = {
   name?: string;
   description?: string;
+  defaultGovernanceAddress?: string | null;
   automationConfig?: {
     autoExecuteEnabled?: boolean;
     maxRiskScore?: number;
@@ -121,6 +123,9 @@ const buildMintSeed = (name: string): string => {
 export const createDao = async (input: CreateDaoInput, userId: Types.ObjectId): Promise<DaoDocument> => {
   const realmAddress = normalizeAddress(input.realmAddress, 'realm address');
   const governanceProgramId = normalizeAddress(input.governanceProgramId, 'governance program id');
+  const defaultGovernanceAddress = input.defaultGovernanceAddress
+    ? normalizeAddress(input.defaultGovernanceAddress, 'default governance address')
+    : undefined;
   const authorityWallet = normalizeAddress(input.authorityWallet, 'authority wallet');
   const communityMint = input.communityMint ? normalizeAddress(input.communityMint, 'community mint') : undefined;
   const councilMint = input.councilMint ? normalizeAddress(input.councilMint, 'council mint') : undefined;
@@ -156,6 +161,7 @@ export const createDao = async (input: CreateDaoInput, userId: Types.ObjectId): 
     network: input.network,
     realmAddress,
     governanceProgramId,
+    defaultGovernanceAddress,
     authorityWallet,
     communityMint,
     councilMint,
@@ -465,6 +471,12 @@ export const updateDao = async (daoId: string, input: UpdateDaoInput, userId: Ty
 
   if (input.description !== undefined) {
     dao.description = input.description;
+  }
+
+  if (input.defaultGovernanceAddress !== undefined) {
+    dao.defaultGovernanceAddress = input.defaultGovernanceAddress
+      ? normalizeAddress(input.defaultGovernanceAddress, 'default governance address')
+      : null;
   }
 
   if (input.automationConfig) {

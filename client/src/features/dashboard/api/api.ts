@@ -9,6 +9,7 @@ export type DaoItem = {
   realmAddress: string;
   description?: string;
   governanceProgramId: string;
+  defaultGovernanceAddress: string | null;
   authorityWallet: string;
   communityMint: string | null;
   councilMint: string | null;
@@ -27,10 +28,22 @@ export type CreateDaoInput = {
   network: 'mainnet-beta' | 'devnet';
   realmAddress: string;
   governanceProgramId: string;
+  defaultGovernanceAddress?: string;
   authorityWallet: string;
   communityMint?: string;
   councilMint?: string;
   slug?: string;
+};
+
+export type UpdateDaoInput = {
+  name?: string;
+  description?: string;
+  defaultGovernanceAddress?: string | null;
+  automationConfig?: {
+    autoExecuteEnabled?: boolean;
+    maxRiskScore?: number;
+    requireSimulation?: boolean;
+  };
 };
 
 export type DaoGovernanceItem = {
@@ -370,9 +383,9 @@ export type PublishFlowInput = {
     enabled: boolean;
     governanceProgramId?: string;
     programVersion: number;
-    realmAddress: string;
-    governanceAddress: string;
-    governingTokenMint: string;
+    realmAddress?: string;
+    governanceAddress?: string;
+    governingTokenMint?: string;
     descriptionLink?: string;
     optionIndex: number;
     useDenyOption: boolean;
@@ -447,6 +460,13 @@ export const createDao = async (input: CreateDaoInput, accessToken: string): Pro
   apiRequest<DaoItem>('/daos', {
     method: 'POST',
     body: input,
+    accessToken,
+  });
+
+export const updateDao = async (daoId: string, input: UpdateDaoInput, accessToken: string): Promise<DaoItem> =>
+  apiRequest<DaoItem>(`/daos/${daoId}`, {
+    method: 'PATCH',
+    body: input as unknown as Record<string, unknown>,
     accessToken,
   });
 

@@ -1182,6 +1182,38 @@ p {
   gap: 0.45rem;
 }
 
+.dao-governance-config {
+  border-top: var(--border);
+  padding-top: 0.5rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.dao-governance-config-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.dao-governance-config-head span {
+  font-size: 0.78rem;
+  color: #666;
+}
+
+.dao-governance-config-head code {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.8rem;
+  color: var(--black);
+}
+
+.dao-governance-config-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.45rem;
+  align-items: end;
+}
+
 .dao-card-actions .secondary-button {
   text-decoration: none;
 }
@@ -1748,6 +1780,10 @@ p {
 
   .form-grid.two-col,
   .form-grid.four-col {
+    grid-template-columns: 1fr;
+  }
+
+  .dao-governance-config-controls {
     grid-template-columns: 1fr;
   }
 }
