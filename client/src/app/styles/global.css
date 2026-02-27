@@ -785,6 +785,23 @@ p {
   outline-offset: 1px;
 }
 
+.text-input.input-invalid,
+.select-input.input-invalid {
+  border-color: #c0392b;
+}
+
+.text-input.input-invalid:focus,
+.select-input.input-invalid:focus {
+  outline: 3px solid #c0392b;
+  outline-offset: 1px;
+}
+
+.field-error {
+  font-size: 0.8rem;
+  color: #c0392b;
+  font-weight: 600;
+}
+
 .error-text {
   font-size: 0.87rem;
   color: #c0392b;

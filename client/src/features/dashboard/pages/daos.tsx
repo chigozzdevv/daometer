@@ -12,8 +12,34 @@ import {
 import { DashboardShell } from '@/features/dashboard/components/shell';
 import { EmptyState, ErrorState, LoadingState } from '@/features/dashboard/components/state';
 import { formatDateTime, shortAddress } from '@/features/dashboard/lib/format';
+import { ApiRequestError } from '@/shared/lib/api-client';
 
-const defaultGovernanceProgramId = 'GovER5Lthms3bLBqWub97yVrMmEogzX7xNjdXpPPCVZw';
+type DaoNetwork = 'mainnet-beta' | 'devnet';
+
+const governanceProgramIdByNetwork: Record<DaoNetwork, string> = {
+  devnet: 'GTesTBiEWE32WHXXE2S4XbZvA5CrEc4xs6ZgRe895dP',
+  'mainnet-beta': 'GovER5Lthms3bLBqWub97yVrMmEogzX7xNjdXpPPCVZw',
+};
+
+const knownGovernanceProgramIds = new Set(Object.values(governanceProgramIdByNetwork));
+
+const getDefaultGovernanceProgramId = (network: DaoNetwork): string => governanceProgramIdByNetwork[network];
+
+const resolveGovernanceProgramIdForNetwork = (current: string, network: DaoNetwork): string => {
+  const trimmed = current.trim();
+
+  if (trimmed.length === 0 || knownGovernanceProgramIds.has(trimmed)) {
+    return getDefaultGovernanceProgramId(network);
+  }
+
+  return current;
+};
+
+type OnchainFieldErrorKey = 'name' | 'governanceProgramId' | 'authorityWallet' | 'communityMint';
+type ImportFieldErrorKey = 'name' | 'realmAddress' | 'governanceProgramId' | 'authorityWallet';
+type MintFieldErrorKey = 'name' | 'decimals' | 'authorityWallet';
+
+type FieldErrors<TField extends string> = Partial<Record<TField, string>>;
 
 type SolanaProviderConnectResult = {
   publicKey?: {
@@ -74,6 +100,45 @@ const bytesToBase64 = (value: Uint8Array): string => {
   return window.btoa(binary);
 };
 
+const toFieldErrors = (error: unknown): Record<string, string> => {
+  if (!(error instanceof ApiRequestError)) {
+    return {};
+  }
+
+  const details = error.details;
+
+  if (!details || typeof details !== 'object') {
+    return {};
+  }
+
+  const fieldErrors = (details as { fieldErrors?: Record<string, string[] | undefined> }).fieldErrors;
+
+  if (!fieldErrors || typeof fieldErrors !== 'object') {
+    return {};
+  }
+
+  const parsed: Record<string, string> = {};
+
+  Object.entries(fieldErrors).forEach(([field, messages]) => {
+    if (!Array.isArray(messages)) {
+      return;
+    }
+
+    const message = messages.find(
+      (entry): entry is string => typeof entry === 'string' && entry.trim().length > 0,
+    );
+
+    if (message) {
+      parsed[field] = message;
+    }
+  });
+
+  return parsed;
+};
+
+const withInputErrorClass = (baseClass: string, hasError: boolean): string =>
+  `${baseClass}${hasError ? ' input-invalid' : ''}`;
+
 const deserializePreparedTransaction = (transactionBase64: string): Transaction | VersionedTransaction => {
   const transactionBytes = base64ToBytes(transactionBase64);
 
@@ -129,17 +194,22 @@ const sendPreparedTransaction = async (
         label: 'signAndSend(transaction-object-no-options)',
         payload: preparedTransaction,
       },
-      {
-        label: 'signAndSend(bytes)',
-        payload: base64ToBytes(transactionBase64),
-        options: {
-          preflightCommitment: 'confirmed',
-        },
-      },
-      { label: 'signAndSend(base58-string)', payload: transactionBase58 },
-      { label: 'signAndSend(base64-string)', payload: transactionBase64 },
-      { label: 'signAndSend(message-object)', payload: { message: transactionMessage } },
     ];
+
+    if (!isPhantomProvider) {
+      directVariants.push(
+        {
+          label: 'signAndSend(bytes)',
+          payload: base64ToBytes(transactionBase64),
+          options: {
+            preflightCommitment: 'confirmed',
+          },
+        },
+        { label: 'signAndSend(base58-string)', payload: transactionBase58 },
+        { label: 'signAndSend(base64-string)', payload: transactionBase64 },
+        { label: 'signAndSend(message-object)', payload: { message: transactionMessage } },
+      );
+    }
 
     for (const variant of directVariants) {
       try {
@@ -157,50 +227,42 @@ const sendPreparedTransaction = async (
     }
   }
 
-  if (typeof provider.request === 'function') {
-    const requestVariants: Array<{ label: string; params: unknown }> = isPhantomProvider
-      ? [
-          // Phantom's injected provider expects base58 string payloads for request().
-          { label: 'request(transaction-base58-string)', params: transactionBase58 },
-          { label: 'request(message-base58-string)', params: transactionMessage },
-          { label: 'request(transaction-base58-object)', params: { transaction: transactionBase58 } },
-          { label: 'request(message-object)', params: { message: transactionMessage } },
-        ]
-      : [
-          { label: 'request(transaction-base58-string)', params: transactionBase58 },
-          { label: 'request([transaction-base58-string])', params: [transactionBase58] },
-          {
-            label: 'request(transaction-base58-object)',
-            params: {
-              transaction: transactionBase58,
-              options: {
-                skipPreflight: false,
-                preflightCommitment: 'confirmed',
-              },
-            },
+  if (typeof provider.request === 'function' && !isPhantomProvider) {
+    const requestVariants: Array<{ label: string; params: unknown }> = [
+      { label: 'request(transaction-base58-string)', params: transactionBase58 },
+      { label: 'request([transaction-base58-string])', params: [transactionBase58] },
+      {
+        label: 'request(transaction-base58-object)',
+        params: {
+          transaction: transactionBase58,
+          options: {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed',
           },
-          {
-            label: 'request(message-object)',
-            params: {
-              message: transactionMessage,
-              options: {
-                skipPreflight: false,
-                preflightCommitment: 'confirmed',
-              },
-            },
+        },
+      },
+      {
+        label: 'request(message-object)',
+        params: {
+          message: transactionMessage,
+          options: {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed',
           },
-          {
-            label: 'request(transaction-base64-object)',
-            params: {
-              transaction: transactionBase64,
-              encoding: 'base64',
-              options: {
-                skipPreflight: false,
-                preflightCommitment: 'confirmed',
-              },
-            },
+        },
+      },
+      {
+        label: 'request(transaction-base64-object)',
+        params: {
+          transaction: transactionBase64,
+          encoding: 'base64',
+          options: {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed',
           },
-        ];
+        },
+      },
+    ];
 
     for (const variant of requestVariants) {
       try {
@@ -241,24 +303,27 @@ export const DashboardDaosPage = (): JSX.Element => {
   const [onchainSuccess, setOnchainSuccess] = useState<string | null>(null);
 
   const [importName, setImportName] = useState('');
-  const [importNetwork, setImportNetwork] = useState<'mainnet-beta' | 'devnet'>('devnet');
+  const [importNetwork, setImportNetwork] = useState<DaoNetwork>('devnet');
   const [importDescription, setImportDescription] = useState('');
   const [importRealmAddress, setImportRealmAddress] = useState('');
-  const [importGovernanceProgramId, setImportGovernanceProgramId] = useState(defaultGovernanceProgramId);
+  const [importGovernanceProgramId, setImportGovernanceProgramId] = useState(getDefaultGovernanceProgramId('devnet'));
   const [importAuthorityWallet, setImportAuthorityWallet] = useState('');
   const [importCommunityMint, setImportCommunityMint] = useState('');
   const [importCouncilMint, setImportCouncilMint] = useState('');
+  const [importFieldErrors, setImportFieldErrors] = useState<FieldErrors<ImportFieldErrorKey>>({});
 
   const [onchainName, setOnchainName] = useState('');
-  const [onchainNetwork, setOnchainNetwork] = useState<'mainnet-beta' | 'devnet'>('devnet');
+  const [onchainNetwork, setOnchainNetwork] = useState<DaoNetwork>('devnet');
   const [onchainDescription, setOnchainDescription] = useState('');
-  const [onchainGovernanceProgramId, setOnchainGovernanceProgramId] = useState(defaultGovernanceProgramId);
+  const [onchainGovernanceProgramId, setOnchainGovernanceProgramId] = useState(getDefaultGovernanceProgramId('devnet'));
   const [onchainAuthorityWallet, setOnchainAuthorityWallet] = useState('');
   const [onchainCommunityMint, setOnchainCommunityMint] = useState('');
   const [onchainCouncilMint, setOnchainCouncilMint] = useState('');
+  const [onchainFieldErrors, setOnchainFieldErrors] = useState<FieldErrors<OnchainFieldErrorKey>>({});
   const [mintTokenName, setMintTokenName] = useState('');
   const [mintDecimals, setMintDecimals] = useState('6');
   const [mintAuthorityWallet, setMintAuthorityWallet] = useState('');
+  const [mintFieldErrors, setMintFieldErrors] = useState<FieldErrors<MintFieldErrorKey>>({});
 
   const loadDaos = async (): Promise<void> => {
     setIsLoading(true);
@@ -312,14 +377,34 @@ export const DashboardDaosPage = (): JSX.Element => {
     event.preventDefault();
     setImportError(null);
     setImportSuccess(null);
+    setImportFieldErrors({});
 
     if (!session?.accessToken) {
       setImportError('You must be authenticated to import a DAO.');
       return;
     }
 
+    const nextFieldErrors: FieldErrors<ImportFieldErrorKey> = {};
+
+    if (!importName.trim()) {
+      nextFieldErrors.name = 'Name is required.';
+    }
+
     if (!importRealmAddress.trim()) {
-      setImportError('Realm address is required to import an existing DAO.');
+      nextFieldErrors.realmAddress = 'Realm address is required.';
+    }
+
+    if (!importGovernanceProgramId.trim()) {
+      nextFieldErrors.governanceProgramId = 'Governance program ID is required.';
+    }
+
+    if (!importAuthorityWallet.trim()) {
+      nextFieldErrors.authorityWallet = 'Authority wallet is required.';
+    }
+
+    if (Object.keys(nextFieldErrors).length > 0) {
+      setImportFieldErrors(nextFieldErrors);
+      setImportError('Please fill all required fields.');
       return;
     }
 
@@ -346,8 +431,32 @@ export const DashboardDaosPage = (): JSX.Element => {
       setImportRealmAddress('');
       setImportCommunityMint('');
       setImportCouncilMint('');
+      setImportFieldErrors({});
       setDaos((prev) => [created, ...prev]);
     } catch (createDaoError) {
+      const fieldErrors = toFieldErrors(createDaoError);
+      const validationFieldErrors: FieldErrors<ImportFieldErrorKey> = {};
+
+      if (fieldErrors.name) {
+        validationFieldErrors.name = fieldErrors.name;
+      }
+
+      if (fieldErrors.realmAddress) {
+        validationFieldErrors.realmAddress = fieldErrors.realmAddress;
+      }
+
+      if (fieldErrors.governanceProgramId) {
+        validationFieldErrors.governanceProgramId = fieldErrors.governanceProgramId;
+      }
+
+      if (fieldErrors.authorityWallet) {
+        validationFieldErrors.authorityWallet = fieldErrors.authorityWallet;
+      }
+
+      if (Object.keys(validationFieldErrors).length > 0) {
+        setImportFieldErrors(validationFieldErrors);
+      }
+
       setImportError(createDaoError instanceof Error ? createDaoError.message : 'Unable to import DAO');
     } finally {
       setIsImporting(false);
@@ -357,14 +466,41 @@ export const DashboardDaosPage = (): JSX.Element => {
   const handleCreateOnchainDao = async (): Promise<void> => {
     setOnchainError(null);
     setOnchainSuccess(null);
+    setOnchainFieldErrors({});
 
     if (!session?.accessToken) {
       setOnchainError('You must be authenticated to create an on-chain DAO.');
       return;
     }
 
+    const nextFieldErrors: FieldErrors<OnchainFieldErrorKey> = {};
+
+    if (!onchainName.trim()) {
+      nextFieldErrors.name = 'Name is required.';
+    }
+
+    if (!onchainGovernanceProgramId.trim()) {
+      nextFieldErrors.governanceProgramId = 'Governance program ID is required.';
+    }
+
+    if (!onchainAuthorityWallet.trim()) {
+      nextFieldErrors.authorityWallet = 'Authority wallet is required.';
+    }
+
     if (!onchainCommunityMint.trim()) {
-      setOnchainError('Community mint is required to create a Realm on-chain.');
+      nextFieldErrors.communityMint = 'Community mint is required.';
+    }
+
+    if (
+      onchainNetwork === 'devnet' &&
+      onchainGovernanceProgramId.trim() === governanceProgramIdByNetwork['mainnet-beta']
+    ) {
+      nextFieldErrors.governanceProgramId = `Use devnet governance program ID: ${governanceProgramIdByNetwork.devnet}`;
+    }
+
+    if (Object.keys(nextFieldErrors).length > 0) {
+      setOnchainFieldErrors(nextFieldErrors);
+      setOnchainError('Please fill all required fields.');
       return;
     }
 
@@ -416,10 +552,34 @@ export const DashboardDaosPage = (): JSX.Element => {
       setImportAuthorityWallet(prepared.authorityWallet);
       setImportCommunityMint(onchainCommunityMint.trim());
       setImportCouncilMint(onchainCouncilMint.trim());
+      setOnchainFieldErrors({});
       setImportSuccess('On-chain Realm created. Review prefilled fields below and click "Import Existing Realm".');
       setOnchainSuccess(`On-chain Realm created (${prepared.realmAddress.slice(0, 8)}...). Tx: ${signature.slice(0, 12)}...`);
       setActiveTab('import');
     } catch (createDaoError) {
+      const fieldErrors = toFieldErrors(createDaoError);
+      const validationFieldErrors: FieldErrors<OnchainFieldErrorKey> = {};
+
+      if (fieldErrors.name) {
+        validationFieldErrors.name = fieldErrors.name;
+      }
+
+      if (fieldErrors.governanceProgramId) {
+        validationFieldErrors.governanceProgramId = fieldErrors.governanceProgramId;
+      }
+
+      if (fieldErrors.authorityWallet) {
+        validationFieldErrors.authorityWallet = fieldErrors.authorityWallet;
+      }
+
+      if (fieldErrors.communityMint) {
+        validationFieldErrors.communityMint = fieldErrors.communityMint;
+      }
+
+      if (Object.keys(validationFieldErrors).length > 0) {
+        setOnchainFieldErrors(validationFieldErrors);
+      }
+
       setOnchainError(createDaoError instanceof Error ? createDaoError.message : 'Unable to create on-chain DAO');
     } finally {
       setIsCreatingOnchain(false);
@@ -429,6 +589,7 @@ export const DashboardDaosPage = (): JSX.Element => {
   const handleCreateCommunityMint = async (): Promise<void> => {
     setOnchainError(null);
     setOnchainSuccess(null);
+    setMintFieldErrors({});
 
     if (!session?.accessToken) {
       setOnchainError('You must be authenticated to create a community mint.');
@@ -436,14 +597,23 @@ export const DashboardDaosPage = (): JSX.Element => {
     }
 
     const parsedDecimals = Number(mintDecimals.trim());
+    const nextFieldErrors: FieldErrors<MintFieldErrorKey> = {};
 
     if (!mintTokenName.trim()) {
-      setOnchainError('Token name is required to generate a community mint.');
-      return;
+      nextFieldErrors.name = 'Token name is required.';
     }
 
     if (!Number.isInteger(parsedDecimals) || parsedDecimals < 0 || parsedDecimals > 9) {
-      setOnchainError('Decimals must be an integer between 0 and 9.');
+      nextFieldErrors.decimals = 'Decimals must be an integer between 0 and 9.';
+    }
+
+    if (!mintAuthorityWallet.trim()) {
+      nextFieldErrors.authorityWallet = 'Mint authority wallet is required.';
+    }
+
+    if (Object.keys(nextFieldErrors).length > 0) {
+      setMintFieldErrors(nextFieldErrors);
+      setOnchainError('Please fill all required fields.');
       return;
     }
 
@@ -488,11 +658,31 @@ export const DashboardDaosPage = (): JSX.Element => {
       setMintAuthorityWallet(prepared.authorityWallet);
       setOnchainCommunityMint(prepared.mintAddress);
       setImportCommunityMint(prepared.mintAddress);
+      setMintFieldErrors({});
       setOnchainSuccess(
         `Community mint created (${prepared.symbol}) ${prepared.mintAddress.slice(0, 8)}... Tx: ${signature.slice(0, 12)}...`,
       );
       setIsCommunityMintModalOpen(false);
     } catch (createMintError) {
+      const fieldErrors = toFieldErrors(createMintError);
+      const validationFieldErrors: FieldErrors<MintFieldErrorKey> = {};
+
+      if (fieldErrors.name) {
+        validationFieldErrors.name = fieldErrors.name;
+      }
+
+      if (fieldErrors.decimals) {
+        validationFieldErrors.decimals = fieldErrors.decimals;
+      }
+
+      if (fieldErrors.authorityWallet) {
+        validationFieldErrors.authorityWallet = fieldErrors.authorityWallet;
+      }
+
+      if (Object.keys(validationFieldErrors).length > 0) {
+        setMintFieldErrors(validationFieldErrors);
+      }
+
       setOnchainError(createMintError instanceof Error ? createMintError.message : 'Unable to create community mint');
     } finally {
       setIsCreatingCommunityMint(false);
@@ -501,6 +691,7 @@ export const DashboardDaosPage = (): JSX.Element => {
 
   const openCommunityMintModal = (): void => {
     setOnchainError(null);
+    setMintFieldErrors({});
     setMintTokenName((current) => current || onchainName.trim());
     setMintAuthorityWallet((current) => current || onchainAuthorityWallet.trim());
     setMintDecimals((current) => current || '6');
@@ -535,12 +726,31 @@ export const DashboardDaosPage = (): JSX.Element => {
           <form className="auth-form" onSubmit={(event) => event.preventDefault()}>
             <label className="input-label">
               Name
-              <input className="text-input" value={onchainName} onChange={(event) => setOnchainName(event.target.value)} minLength={2} required />
+              <input
+                className={withInputErrorClass('text-input', Boolean(onchainFieldErrors.name))}
+                value={onchainName}
+                onChange={(event) => {
+                  setOnchainName(event.target.value);
+                  setOnchainFieldErrors((current) => ({ ...current, name: undefined }));
+                }}
+                minLength={2}
+                aria-invalid={Boolean(onchainFieldErrors.name)}
+                required
+              />
+              {onchainFieldErrors.name ? <span className="field-error">{onchainFieldErrors.name}</span> : null}
             </label>
 
             <label className="input-label">
               Network
-              <select className="select-input" value={onchainNetwork} onChange={(event) => setOnchainNetwork(event.target.value as 'mainnet-beta' | 'devnet')}>
+              <select
+                className="select-input"
+                value={onchainNetwork}
+                onChange={(event) => {
+                  const nextNetwork = event.target.value as DaoNetwork;
+                  setOnchainNetwork(nextNetwork);
+                  setOnchainGovernanceProgramId((current) => resolveGovernanceProgramIdForNetwork(current, nextNetwork));
+                }}
+              >
                 <option value="devnet">devnet</option>
                 <option value="mainnet-beta">mainnet-beta</option>
               </select>
@@ -549,22 +759,50 @@ export const DashboardDaosPage = (): JSX.Element => {
             <label className="input-label">
               Governance Program ID
               <input
-                className="text-input"
+                className={withInputErrorClass('text-input', Boolean(onchainFieldErrors.governanceProgramId))}
                 value={onchainGovernanceProgramId}
-                onChange={(event) => setOnchainGovernanceProgramId(event.target.value)}
+                onChange={(event) => {
+                  setOnchainGovernanceProgramId(event.target.value);
+                  setOnchainFieldErrors((current) => ({ ...current, governanceProgramId: undefined }));
+                }}
+                aria-invalid={Boolean(onchainFieldErrors.governanceProgramId)}
                 required
               />
+              {onchainFieldErrors.governanceProgramId ? (
+                <span className="field-error">{onchainFieldErrors.governanceProgramId}</span>
+              ) : null}
             </label>
 
             <label className="input-label">
               Authority Wallet
-              <input className="text-input" value={onchainAuthorityWallet} onChange={(event) => setOnchainAuthorityWallet(event.target.value)} required />
+              <input
+                className={withInputErrorClass('text-input', Boolean(onchainFieldErrors.authorityWallet))}
+                value={onchainAuthorityWallet}
+                onChange={(event) => {
+                  setOnchainAuthorityWallet(event.target.value);
+                  setOnchainFieldErrors((current) => ({ ...current, authorityWallet: undefined }));
+                }}
+                aria-invalid={Boolean(onchainFieldErrors.authorityWallet)}
+                required
+              />
+              {onchainFieldErrors.authorityWallet ? (
+                <span className="field-error">{onchainFieldErrors.authorityWallet}</span>
+              ) : null}
             </label>
 
             <label className="input-label">
               Community Mint
               <div className="input-with-action">
-                <input className="text-input" value={onchainCommunityMint} onChange={(event) => setOnchainCommunityMint(event.target.value)} required />
+                <input
+                  className={withInputErrorClass('text-input', Boolean(onchainFieldErrors.communityMint))}
+                  value={onchainCommunityMint}
+                  onChange={(event) => {
+                    setOnchainCommunityMint(event.target.value);
+                    setOnchainFieldErrors((current) => ({ ...current, communityMint: undefined }));
+                  }}
+                  aria-invalid={Boolean(onchainFieldErrors.communityMint)}
+                  required
+                />
                 <button
                   type="button"
                   className="secondary-button"
@@ -576,6 +814,7 @@ export const DashboardDaosPage = (): JSX.Element => {
                   {isCreatingCommunityMint ? 'Generating...' : 'Generate'}
                 </button>
               </div>
+              {onchainFieldErrors.communityMint ? <span className="field-error">{onchainFieldErrors.communityMint}</span> : null}
             </label>
 
             <label className="input-label">
@@ -605,12 +844,31 @@ export const DashboardDaosPage = (): JSX.Element => {
           <form className="auth-form" onSubmit={handleImportDao}>
             <label className="input-label">
               Name
-              <input className="text-input" value={importName} onChange={(event) => setImportName(event.target.value)} minLength={2} required />
+              <input
+                className={withInputErrorClass('text-input', Boolean(importFieldErrors.name))}
+                value={importName}
+                onChange={(event) => {
+                  setImportName(event.target.value);
+                  setImportFieldErrors((current) => ({ ...current, name: undefined }));
+                }}
+                minLength={2}
+                aria-invalid={Boolean(importFieldErrors.name)}
+                required
+              />
+              {importFieldErrors.name ? <span className="field-error">{importFieldErrors.name}</span> : null}
             </label>
 
             <label className="input-label">
               Network
-              <select className="select-input" value={importNetwork} onChange={(event) => setImportNetwork(event.target.value as 'mainnet-beta' | 'devnet')}>
+              <select
+                className="select-input"
+                value={importNetwork}
+                onChange={(event) => {
+                  const nextNetwork = event.target.value as DaoNetwork;
+                  setImportNetwork(nextNetwork);
+                  setImportGovernanceProgramId((current) => resolveGovernanceProgramIdForNetwork(current, nextNetwork));
+                }}
+              >
                 <option value="devnet">devnet</option>
                 <option value="mainnet-beta">mainnet-beta</option>
               </select>
@@ -618,22 +876,51 @@ export const DashboardDaosPage = (): JSX.Element => {
 
             <label className="input-label">
               Realm Address
-              <input className="text-input" value={importRealmAddress} onChange={(event) => setImportRealmAddress(event.target.value)} required />
+              <input
+                className={withInputErrorClass('text-input', Boolean(importFieldErrors.realmAddress))}
+                value={importRealmAddress}
+                onChange={(event) => {
+                  setImportRealmAddress(event.target.value);
+                  setImportFieldErrors((current) => ({ ...current, realmAddress: undefined }));
+                }}
+                aria-invalid={Boolean(importFieldErrors.realmAddress)}
+                required
+              />
+              {importFieldErrors.realmAddress ? <span className="field-error">{importFieldErrors.realmAddress}</span> : null}
             </label>
 
             <label className="input-label">
               Governance Program ID
               <input
-                className="text-input"
+                className={withInputErrorClass('text-input', Boolean(importFieldErrors.governanceProgramId))}
                 value={importGovernanceProgramId}
-                onChange={(event) => setImportGovernanceProgramId(event.target.value)}
+                onChange={(event) => {
+                  setImportGovernanceProgramId(event.target.value);
+                  setImportFieldErrors((current) => ({ ...current, governanceProgramId: undefined }));
+                }}
+                aria-invalid={Boolean(importFieldErrors.governanceProgramId)}
                 required
               />
+              {importFieldErrors.governanceProgramId ? (
+                <span className="field-error">{importFieldErrors.governanceProgramId}</span>
+              ) : null}
             </label>
 
             <label className="input-label">
               Authority Wallet
-              <input className="text-input" value={importAuthorityWallet} onChange={(event) => setImportAuthorityWallet(event.target.value)} required />
+              <input
+                className={withInputErrorClass('text-input', Boolean(importFieldErrors.authorityWallet))}
+                value={importAuthorityWallet}
+                onChange={(event) => {
+                  setImportAuthorityWallet(event.target.value);
+                  setImportFieldErrors((current) => ({ ...current, authorityWallet: undefined }));
+                }}
+                aria-invalid={Boolean(importFieldErrors.authorityWallet)}
+                required
+              />
+              {importFieldErrors.authorityWallet ? (
+                <span className="field-error">{importFieldErrors.authorityWallet}</span>
+              ) : null}
             </label>
 
             <label className="input-label">
@@ -676,36 +963,53 @@ export const DashboardDaosPage = (): JSX.Element => {
             <label className="input-label">
               Token Name
               <input
-                className="text-input"
+                className={withInputErrorClass('text-input', Boolean(mintFieldErrors.name))}
                 value={mintTokenName}
-                onChange={(event) => setMintTokenName(event.target.value)}
+                onChange={(event) => {
+                  setMintTokenName(event.target.value);
+                  setMintFieldErrors((current) => ({ ...current, name: undefined }));
+                }}
                 minLength={2}
                 maxLength={120}
+                aria-invalid={Boolean(mintFieldErrors.name)}
                 required
               />
+              {mintFieldErrors.name ? <span className="field-error">{mintFieldErrors.name}</span> : null}
             </label>
 
             <label className="input-label">
               Decimals
               <input
-                className="text-input"
+                className={withInputErrorClass('text-input', Boolean(mintFieldErrors.decimals))}
                 type="number"
                 min={0}
                 max={9}
                 value={mintDecimals}
-                onChange={(event) => setMintDecimals(event.target.value)}
+                onChange={(event) => {
+                  setMintDecimals(event.target.value);
+                  setMintFieldErrors((current) => ({ ...current, decimals: undefined }));
+                }}
+                aria-invalid={Boolean(mintFieldErrors.decimals)}
                 required
               />
+              {mintFieldErrors.decimals ? <span className="field-error">{mintFieldErrors.decimals}</span> : null}
             </label>
 
             <label className="input-label">
               Mint Authority Wallet
               <input
-                className="text-input"
+                className={withInputErrorClass('text-input', Boolean(mintFieldErrors.authorityWallet))}
                 value={mintAuthorityWallet}
-                onChange={(event) => setMintAuthorityWallet(event.target.value)}
+                onChange={(event) => {
+                  setMintAuthorityWallet(event.target.value);
+                  setMintFieldErrors((current) => ({ ...current, authorityWallet: undefined }));
+                }}
+                aria-invalid={Boolean(mintFieldErrors.authorityWallet)}
                 required
               />
+              {mintFieldErrors.authorityWallet ? (
+                <span className="field-error">{mintFieldErrors.authorityWallet}</span>
+              ) : null}
             </label>
 
             <div className="modal-actions">

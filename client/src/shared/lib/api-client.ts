@@ -14,12 +14,14 @@ export const setAuthExpiredHandler = (handler: AuthExpiredHandler | null): void 
 export class ApiRequestError extends Error {
   status: number;
   code: string | null;
+  details: unknown;
 
-  constructor(message: string, status: number, code: string | null) {
+  constructor(message: string, status: number, code: string | null, details?: unknown) {
     super(message);
     this.name = 'ApiRequestError';
     this.status = status;
     this.code = code;
+    this.details = details ?? null;
   }
 }
 
@@ -46,6 +48,7 @@ export const apiRequest = async <TResponse>(path: string, options: ApiRequestOpt
         error?: {
           message?: string;
           code?: string;
+          details?: unknown;
         };
       }
     | null;
@@ -53,6 +56,7 @@ export const apiRequest = async <TResponse>(path: string, options: ApiRequestOpt
   if (!response.ok || !payload?.success || !('data' in payload) || payload.data === undefined) {
     const message = payload?.error?.message ?? 'Request failed';
     const code = payload?.error?.code ?? null;
+    const details = payload?.error?.details ?? null;
 
     const shouldHandleExpiredSession =
       Boolean(options.accessToken) &&
@@ -63,7 +67,7 @@ export const apiRequest = async <TResponse>(path: string, options: ApiRequestOpt
       authExpiredHandler?.();
     }
 
-    throw new ApiRequestError(message, response.status, code);
+    throw new ApiRequestError(message, response.status, code, details);
   }
 
   return payload.data;

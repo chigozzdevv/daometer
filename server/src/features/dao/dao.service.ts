@@ -79,6 +79,11 @@ const defaultRpcByNetwork: Record<'devnet' | 'mainnet-beta', string> = {
   'mainnet-beta': 'https://api.mainnet-beta.solana.com',
 };
 
+const defaultGovernanceProgramByNetwork: Record<'devnet' | 'mainnet-beta', string> = {
+  devnet: 'GTesTBiEWE32WHXXE2S4XbZvA5CrEc4xs6ZgRe895dP',
+  'mainnet-beta': SOLANA_PROGRAM_IDS.governanceProgram,
+};
+
 const TOKEN_MINT_ACCOUNT_SIZE = 82;
 
 const buildTokenSymbol = (name: string): string => {
@@ -190,7 +195,7 @@ export const prepareDaoOnchainCreate = async (
 
   const governanceProgramId = input.governanceProgramId
     ? normalizeAddress(input.governanceProgramId, 'governance program id')
-    : SOLANA_PROGRAM_IDS.governanceProgram;
+    : defaultGovernanceProgramByNetwork[input.network];
   const communityMint = normalizeAddress(input.communityMint, 'community mint');
   const councilMint = input.councilMint ? normalizeAddress(input.councilMint, 'council mint') : undefined;
   const rpcUrl = input.rpcUrl ?? defaultRpcByNetwork[input.network];
