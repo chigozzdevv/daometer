@@ -136,11 +136,13 @@ On each tick, the worker:
 5. Claims one job with distributed lock semantics
 6. Executes, reschedules, or fails the job based on DAO policy and proposal state
 
-Onchain execution requires:
+Onchain proposal execution (worker-driven) requires:
 
 - `WORKER_EXECUTOR_SECRET_KEY` configured
 - `proposal.onchainExecution.enabled=true`
 - governance metadata + transaction addresses attached via onchain config or sync endpoint
+
+Realm creation (`POST /api/v1/daos/onchain-create`) is non-custodial and uses the connected user wallet as payer/signer.
 
 Workflow email actions require:
 
