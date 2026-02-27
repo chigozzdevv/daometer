@@ -11,7 +11,7 @@ import {
   TransactionInstruction,
   type Commitment,
 } from '@solana/web3.js';
-import { getAllGovernances, MintMaxVoteWeightSource, withCreateRealm } from '@realms-today/spl-governance';
+import { getAllGovernances, getNativeTreasuryAddress, MintMaxVoteWeightSource, withCreateRealm } from '@realms-today/spl-governance';
 import { env } from '@/config/env.config';
 import { UserModel } from '@/features/auth/auth.model';
 import { DaoModel, type DaoDocument } from '@/features/dao/dao.model';
@@ -69,6 +69,7 @@ type PrepareCommunityMintInput = {
 type DaoGovernanceSummary = {
   address: string;
   governedAccount: string | null;
+  nativeTreasuryAddress: string;
 };
 
 const normalizeAddress = (address: string, fieldName: string): string => {
@@ -403,7 +404,7 @@ export const listDaoGovernances = async (
     ? (allGovernancesRaw as Array<unknown>).flat()
     : [];
 
-  const items = flattenedGovernances
+  const governanceRows = flattenedGovernances
     .map((governanceAccount) => {
       const pubkey = (governanceAccount as { pubkey?: PublicKey }).pubkey;
       const governedAccount = (governanceAccount as { account?: { governedAccount?: PublicKey | null } }).account
@@ -414,11 +415,25 @@ export const listDaoGovernances = async (
       }
 
       return {
-        address: pubkey.toBase58(),
+        pubkey,
         governedAccount: governedAccount instanceof PublicKey ? governedAccount.toBase58() : null,
-      } satisfies DaoGovernanceSummary;
+      };
     })
-    .filter((value): value is DaoGovernanceSummary => Boolean(value))
+    .filter((value): value is { pubkey: PublicKey; governedAccount: string | null } => Boolean(value));
+
+  const items = (
+    await Promise.all(
+      governanceRows.map(async (row) => {
+        const nativeTreasuryAddress = await getNativeTreasuryAddress(programId, row.pubkey);
+
+        return {
+          address: row.pubkey.toBase58(),
+          governedAccount: row.governedAccount,
+          nativeTreasuryAddress: nativeTreasuryAddress.toBase58(),
+        } satisfies DaoGovernanceSummary;
+      }),
+    )
+  )
     .sort((left, right) => left.address.localeCompare(right.address));
 
   return {

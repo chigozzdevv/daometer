@@ -368,6 +368,10 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
   const [publishGoverningTokenMint, setPublishGoverningTokenMint] = useState('');
 
   const graphNodeMap = useMemo(() => new Map(graphNodes.map((node) => [node.id, node])), [graphNodes]);
+  const selectedGovernance = useMemo(
+    () => governanceOptions.find((item) => item.address === publishGovernanceAddress) ?? governanceOptions[0] ?? null,
+    [governanceOptions, publishGovernanceAddress],
+  );
   const getNodeWidth = (nodeId: string): number => nodeWidths[nodeId] ?? defaultNodeWidth;
 
   const orderingPreview = useMemo(() => {
@@ -841,8 +845,80 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
     }
   };
 
+  const useDaoDefaultPubkey = (value: unknown, defaultValue?: string | null): string => {
+    const current = getString(value).trim();
+
+    if (current.length > 0 && current !== PLACEHOLDER_PUBKEY) {
+      return current;
+    }
+
+    const fallback = (defaultValue ?? '').trim();
+    return fallback.length > 0 ? fallback : PLACEHOLDER_PUBKEY;
+  };
+
+  const applyDaoDefaultsToBlock = (block: FlowBlockInput): FlowBlockInput => {
+    const blockType = getString(block.type) as SupportedBlockType;
+    const governanceAddress = selectedGovernance?.address ?? '';
+    const nativeTreasuryAddress = selectedGovernance?.nativeTreasuryAddress ?? '';
+    const communityMint = publishGoverningTokenMint || daoContext?.communityMint || '';
+
+    if (blockType === 'transfer-sol') {
+      return {
+        ...block,
+        fromGovernance: useDaoDefaultPubkey(block.fromGovernance, nativeTreasuryAddress),
+        toWallet: useDaoDefaultPubkey(block.toWallet),
+      };
+    }
+
+    if (blockType === 'transfer-spl') {
+      return {
+        ...block,
+        tokenMint: useDaoDefaultPubkey(block.tokenMint, communityMint),
+        fromTokenAccount: useDaoDefaultPubkey(block.fromTokenAccount),
+        toTokenAccount: useDaoDefaultPubkey(block.toTokenAccount),
+      };
+    }
+
+    if (blockType === 'set-governance-config') {
+      return {
+        ...block,
+        governanceAddress: useDaoDefaultPubkey(block.governanceAddress, governanceAddress),
+      };
+    }
+
+    if (blockType === 'program-upgrade') {
+      return {
+        ...block,
+        spillAddress: useDaoDefaultPubkey(block.spillAddress, nativeTreasuryAddress),
+      };
+    }
+
+    if (blockType === 'create-token-account') {
+      return {
+        ...block,
+        payer: useDaoDefaultPubkey(block.payer, nativeTreasuryAddress),
+        owner: useDaoDefaultPubkey(block.owner, nativeTreasuryAddress),
+        mint: useDaoDefaultPubkey(block.mint, communityMint),
+      };
+    }
+
+    if (blockType === 'create-stream') {
+      return {
+        ...block,
+        tokenMint: useDaoDefaultPubkey(block.tokenMint, communityMint),
+      };
+    }
+
+    return block;
+  };
+
+  const applyDaoDefaultsToAllBlocks = (): void => {
+    setBlocks((current) => current.map((block) => applyDaoDefaultsToBlock(block)));
+    markDirty();
+  };
+
   const addBlock = (type: SupportedBlockType): void => {
-    const nextBlock = defaultBlockForType(type);
+    const nextBlock = applyDaoDefaultsToBlock(defaultBlockForType(type));
     const nextBlockId = getString(nextBlock.id);
 
     setBlocks((current) => [...current, nextBlock]);
@@ -900,7 +976,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
           return block;
         }
 
-        const next = defaultBlockForType(nextType);
+        const next = applyDaoDefaultsToBlock(defaultBlockForType(nextType));
         return {
           ...next,
           id: blockId,
@@ -1192,6 +1268,20 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
           <span className="hint-text">{lastSavedAt ? `Last saved: ${formatDateTime(lastSavedAt)}` : 'Not saved yet'}</span>
           <span className="hint-text">Drag from empty block area. Resize from bottom-right corner.</span>
         </div>
+
+        <div className="button-row">
+          <button type="button" className="secondary-button" onClick={applyDaoDefaultsToAllBlocks}>
+            Load DAO primitives into blocks
+          </button>
+        </div>
+
+        {selectedGovernance ? (
+          <p className="hint-text">
+            Governance: <code>{selectedGovernance.address}</code> | Native treasury: <code>{selectedGovernance.nativeTreasuryAddress}</code>
+          </p>
+        ) : (
+          <p className="hint-text">No governance selected yet. Go to Publish step and select a governance account.</p>
+        )}
 
         <div className="flow-palette">
           {supportedBlockTypes.map((typeItem) => (

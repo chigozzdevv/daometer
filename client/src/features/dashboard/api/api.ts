@@ -36,6 +36,7 @@ export type CreateDaoInput = {
 export type DaoGovernanceItem = {
   address: string;
   governedAccount: string | null;
+  nativeTreasuryAddress: string;
 };
 
 export type DaoGovernancesResponse = {
