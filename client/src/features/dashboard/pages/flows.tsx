@@ -226,7 +226,7 @@ export const DashboardFlowsPage = (): JSX.Element => {
           </label>
 
           <label className="input-label">
-            Description
+            Flow description (optional)
             <textarea
               className="text-input textarea-input"
               value={detailsDescription}
