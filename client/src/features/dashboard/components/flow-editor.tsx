@@ -15,6 +15,8 @@ import { formatDateTime } from '@/features/dashboard/lib/format';
 
 const canvasNodeWidth = 360;
 const canvasNodeHeight = 210;
+const PLACEHOLDER_PUBKEY = '11111111111111111111111111111111';
+const PLACEHOLDER_BASE64 = 'AQ==';
 
 type SupportedBlockType =
   | 'transfer-sol'
@@ -46,8 +48,8 @@ const createDefaultBlock = (): FlowBlockInput => ({
   id: makeBlockId(),
   type: 'transfer-sol',
   label: 'Treasury transfer',
-  fromGovernance: '',
-  toWallet: '',
+  fromGovernance: PLACEHOLDER_PUBKEY,
+  toWallet: PLACEHOLDER_PUBKEY,
   lamports: 1_000_000,
 });
 
@@ -57,8 +59,8 @@ const defaultBlockForType = (type: SupportedBlockType): FlowBlockInput => {
       id: makeBlockId(),
       type,
       label: 'Treasury transfer',
-      fromGovernance: '',
-      toWallet: '',
+      fromGovernance: PLACEHOLDER_PUBKEY,
+      toWallet: PLACEHOLDER_PUBKEY,
       lamports: 1_000_000,
     };
   }
@@ -68,9 +70,9 @@ const defaultBlockForType = (type: SupportedBlockType): FlowBlockInput => {
       id: makeBlockId(),
       type,
       label: 'Token transfer',
-      tokenMint: '',
-      fromTokenAccount: '',
-      toTokenAccount: '',
+      tokenMint: PLACEHOLDER_PUBKEY,
+      fromTokenAccount: PLACEHOLDER_PUBKEY,
+      toTokenAccount: PLACEHOLDER_PUBKEY,
       amount: '1',
       decimals: 6,
     };
@@ -81,7 +83,7 @@ const defaultBlockForType = (type: SupportedBlockType): FlowBlockInput => {
       id: makeBlockId(),
       type,
       label: 'Governance config update',
-      governanceAddress: '',
+      governanceAddress: PLACEHOLDER_PUBKEY,
       yesVoteThresholdPercent: 60,
       baseVotingTimeSeconds: 259200,
       minInstructionHoldUpTimeSeconds: 0,
@@ -94,9 +96,9 @@ const defaultBlockForType = (type: SupportedBlockType): FlowBlockInput => {
       id: makeBlockId(),
       type,
       label: 'Upgrade program',
-      programId: '',
-      bufferAddress: '',
-      spillAddress: '',
+      programId: PLACEHOLDER_PUBKEY,
+      bufferAddress: PLACEHOLDER_PUBKEY,
+      spillAddress: PLACEHOLDER_PUBKEY,
     };
   }
 
@@ -108,10 +110,10 @@ const defaultBlockForType = (type: SupportedBlockType): FlowBlockInput => {
       id: makeBlockId(),
       type,
       label: 'Create stream',
-      streamProgramId: '',
-      treasuryTokenAccount: '',
-      recipientWallet: '',
-      tokenMint: '',
+      streamProgramId: PLACEHOLDER_PUBKEY,
+      treasuryTokenAccount: PLACEHOLDER_PUBKEY,
+      recipientWallet: PLACEHOLDER_PUBKEY,
+      tokenMint: PLACEHOLDER_PUBKEY,
       totalAmount: '100',
       startAt: now.toISOString(),
       endAt: in30Days.toISOString(),
@@ -123,8 +125,8 @@ const defaultBlockForType = (type: SupportedBlockType): FlowBlockInput => {
     id: makeBlockId(),
     type: 'custom-instruction',
     label: 'Custom instruction',
-    programId: '',
-    dataBase64: '',
+    programId: PLACEHOLDER_PUBKEY,
+    dataBase64: PLACEHOLDER_BASE64,
     kind: 'custom',
     accounts: [],
     accountsCsv: '',

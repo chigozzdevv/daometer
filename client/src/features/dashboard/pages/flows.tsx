@@ -7,6 +7,7 @@ import { DaoSelect } from '@/features/dashboard/components/dao-select';
 import { ErrorState, LoadingState } from '@/features/dashboard/components/state';
 
 const makeBlockId = (): string => `block-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const PLACEHOLDER_PUBKEY = '11111111111111111111111111111111';
 
 const createDefaultFlowDraft = (): { blocks: Record<string, unknown>[]; graph: FlowGraph } => {
   const blockId = makeBlockId();
@@ -17,8 +18,8 @@ const createDefaultFlowDraft = (): { blocks: Record<string, unknown>[]; graph: F
         id: blockId,
         type: 'transfer-sol',
         label: 'Treasury transfer',
-        fromGovernance: '',
-        toWallet: '',
+        fromGovernance: PLACEHOLDER_PUBKEY,
+        toWallet: PLACEHOLDER_PUBKEY,
         lamports: 1_000_000,
       },
     ],
