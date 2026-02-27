@@ -1247,7 +1247,7 @@ p {
 
 .editor-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 0.8rem;
 }
 
@@ -1258,6 +1258,54 @@ p {
   display: grid;
   gap: 0.8rem;
   align-content: start;
+}
+
+.flow-workspace {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.flow-step-card {
+  border: var(--border);
+  background: var(--white);
+  padding: 0.95rem;
+  display: grid;
+  gap: 0.75rem;
+  box-shadow: var(--shadow);
+}
+
+.flow-step-card--canvas {
+  padding-bottom: 1.05rem;
+}
+
+.flow-step-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.flow-step-head h2 {
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.flow-step-head p {
+  margin-top: 0.2rem;
+  font-size: 0.84rem;
+  color: #666;
+}
+
+.flow-step-index {
+  border: var(--border);
+  background: var(--yellow);
+  box-shadow: var(--shadow);
+  min-width: 62px;
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.36rem 0.48rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .editor-header h2 {
@@ -1313,15 +1361,17 @@ p {
   border: var(--border);
   background: var(--bg);
   position: relative;
-  min-height: 720px;
-  overflow: auto;
+  width: 100%;
+  height: calc(100vh - 220px);
+  min-height: 760px;
+  overflow: hidden;
 }
 
 .flow-canvas-svg {
   position: absolute;
   inset: 0;
-  width: 1800px;
-  height: 1200px;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
 }
 
@@ -1395,6 +1445,10 @@ p {
   border: 1px solid #ccc;
   padding: 0.35rem 0.45rem;
   background: var(--white);
+}
+
+.flow-edge-item span {
+  overflow-wrap: anywhere;
 }
 
 .subheading {
@@ -1556,6 +1610,19 @@ p {
 
   .editor-grid {
     grid-template-columns: 1fr;
+  }
+
+  .flow-step-head {
+    flex-direction: column;
+  }
+
+  .flow-canvas-board {
+    height: 72vh;
+    min-height: 560px;
+  }
+
+  .flow-canvas-node {
+    width: min(320px, calc(100vw - 4.2rem));
   }
 
   .form-grid.two-col,

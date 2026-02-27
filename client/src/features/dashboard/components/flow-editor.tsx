@@ -1124,11 +1124,14 @@ export const FlowEditor = ({
   };
 
   return (
-    <section className="editor-grid">
-      <article className="editor-card">
-        <header className="editor-header">
-          <h2>Flow Studio</h2>
-          <p>Drag nodes in the canvas, connect execution order, then compile and publish.</p>
+    <section className="flow-workspace">
+      <article className="flow-step-card">
+        <header className="flow-step-head">
+          <span className="flow-step-index">Step 1</span>
+          <div>
+            <h2>Pick Flow + Basic Details</h2>
+            <p>Choose an existing flow or start new, then set core metadata.</p>
+          </div>
         </header>
 
         <div className="form-grid two-col">
@@ -1193,8 +1196,17 @@ export const FlowEditor = ({
             rows={3}
           />
         </label>
+      </article>
 
-        <h3 className="subheading">Block Palette</h3>
+      <article className="flow-step-card flow-step-card--canvas">
+        <header className="flow-step-head">
+          <span className="flow-step-index">Step 2</span>
+          <div>
+            <h2>Build Diagram</h2>
+            <p>Full-page canvas for drag, connect, and block configuration.</p>
+          </div>
+        </header>
+
         <div className="flow-palette">
           {supportedBlockTypes.map((typeItem) => (
             <button
@@ -1208,8 +1220,7 @@ export const FlowEditor = ({
           ))}
         </div>
 
-        <h3 className="subheading">Canvas</h3>
-        <p className="hint-text">Drag nodes by the handle. Click "Start link" on a source, then "Link here" on a target.</p>
+        <p className="hint-text">Drag nodes by the handle. Click Start link on a source, then Link here on a target.</p>
         {orderingPreview.error ? <p className="error-text">{orderingPreview.error}</p> : null}
 
         <div className="flow-canvas-board" ref={canvasRef}>
@@ -1257,7 +1268,7 @@ export const FlowEditor = ({
                     className={`secondary-button flow-node-mini ${pendingLinkSourceId === blockId ? 'flow-link-active' : ''}`}
                     onClick={() => setPendingLinkSourceId((current) => (current === blockId ? null : blockId))}
                   >
-                    {pendingLinkSourceId === blockId ? 'Linking…' : 'Start link'}
+                    {pendingLinkSourceId === blockId ? 'Linking...' : 'Start link'}
                   </button>
 
                   {pendingLinkSourceId && pendingLinkSourceId !== blockId ? (
@@ -1308,7 +1319,7 @@ export const FlowEditor = ({
             {graphEdges.map((edge) => (
               <div key={edge.id} className="flow-edge-item">
                 <span>
-                  {edge.source.slice(0, 6)}... → {edge.target.slice(0, 6)}...
+                  {edge.source.slice(0, 6)}... to {edge.target.slice(0, 6)}...
                 </span>
                 <button type="button" className="secondary-button flow-node-mini" onClick={() => removeEdge(edge.id)}>
                   Remove link
@@ -1317,8 +1328,17 @@ export const FlowEditor = ({
             ))}
           </div>
         ) : null}
+      </article>
 
-        <h3 className="subheading">Proposal Defaults</h3>
+      <article className="flow-step-card">
+        <header className="flow-step-head">
+          <span className="flow-step-index">Step 3</span>
+          <div>
+            <h2>Defaults + Compile</h2>
+            <p>Set proposal defaults, compile context, then save/compile.</p>
+          </div>
+        </header>
+
         <div className="form-grid four-col">
           <label className="input-label">
             Title prefix
@@ -1376,7 +1396,6 @@ export const FlowEditor = ({
           </label>
         </div>
 
-        <h3 className="subheading">Compile Context</h3>
         <label className="input-label">
           Context JSON
           <textarea
@@ -1397,14 +1416,6 @@ export const FlowEditor = ({
           <button type="button" className="secondary-button" onClick={() => void handleCompile()} disabled={isCompiling}>
             {isCompiling ? 'Compiling...' : 'Compile flow'}
           </button>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => void handlePublish()}
-            disabled={activeFlowId === newFlowKey || isPublishing}
-          >
-            {isPublishing ? 'Publishing...' : 'Publish flow'}
-          </button>
         </div>
 
         {error ? <p className="error-text">{error}</p> : null}
@@ -1412,10 +1423,13 @@ export const FlowEditor = ({
         {selectedDao ? <p className="hint-text">DAO: {selectedDao.name}</p> : null}
       </article>
 
-      <article className="editor-card">
-        <header className="editor-header">
-          <h2>Publish Settings</h2>
-          <p>Publishing creates a proposal record; enable on-chain creation to push directly to Realms.</p>
+      <article className="flow-step-card">
+        <header className="flow-step-head">
+          <span className="flow-step-index">Step 4</span>
+          <div>
+            <h2>Publish Settings</h2>
+            <p>Configure final publish behavior and optional on-chain creation.</p>
+          </div>
         </header>
 
         <div className="form-grid two-col">
@@ -1495,7 +1509,6 @@ export const FlowEditor = ({
           </label>
         </div>
 
-        <h3 className="subheading">On-chain Proposal Creation</h3>
         <label className="checkbox-field">
           <input
             type="checkbox"
@@ -1589,6 +1602,27 @@ export const FlowEditor = ({
             </label>
           </div>
         ) : null}
+
+        <div className="button-row">
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => void handlePublish()}
+            disabled={activeFlowId === newFlowKey || isPublishing}
+          >
+            {isPublishing ? 'Publishing...' : 'Publish flow'}
+          </button>
+        </div>
+      </article>
+
+      <article className="flow-step-card">
+        <header className="flow-step-head">
+          <span className="flow-step-index">Step 5</span>
+          <div>
+            <h2>Output</h2>
+            <p>View compile risk and latest publish details.</p>
+          </div>
+        </header>
 
         <h3 className="subheading">Compilation Output</h3>
         {compileResult ? (
