@@ -135,6 +135,7 @@ const sendPreparedTransaction = async (
 export const DashboardDaosPage = (): JSX.Element => {
   const { session } = useAuth();
   const [daos, setDaos] = useState<DaoItem[]>([]);
+  const [activeTab, setActiveTab] = useState<'onchain' | 'import'>('onchain');
   const [isLoading, setIsLoading] = useState(true);
   const [isImporting, setIsImporting] = useState(false);
   const [isCreatingOnchain, setIsCreatingOnchain] = useState(false);
@@ -317,6 +318,7 @@ export const DashboardDaosPage = (): JSX.Element => {
       setImportCouncilMint(onchainCouncilMint.trim());
       setImportSuccess('On-chain Realm created. Review prefilled fields below and click "Import Existing Realm".');
       setOnchainSuccess(`On-chain Realm created (${prepared.realmAddress.slice(0, 8)}...). Tx: ${signature.slice(0, 12)}...`);
+      setActiveTab('import');
     } catch (createDaoError) {
       setOnchainError(createDaoError instanceof Error ? createDaoError.message : 'Unable to create on-chain DAO');
     } finally {
@@ -328,129 +330,142 @@ export const DashboardDaosPage = (): JSX.Element => {
     <DashboardShell title="DAOs" description="Create on-chain Realms, then import existing Realm addresses into Daometer.">
       <article className="data-card">
         <div className="data-card-header">
-          <h3>Create On-chain Realm</h3>
-          <span className="status-chip">wallet-sign</span>
+          <h3>DAO Setup</h3>
+          <span className="status-chip">{activeTab === 'onchain' ? 'wallet-sign' : 'register'}</span>
         </div>
-        <form className="auth-form" onSubmit={(event) => event.preventDefault()}>
-          <label className="input-label">
-            Name
-            <input className="text-input" value={onchainName} onChange={(event) => setOnchainName(event.target.value)} minLength={2} required />
-          </label>
-
-          <label className="input-label">
-            Network
-            <select className="select-input" value={onchainNetwork} onChange={(event) => setOnchainNetwork(event.target.value as 'mainnet-beta' | 'devnet')}>
-              <option value="devnet">devnet</option>
-              <option value="mainnet-beta">mainnet-beta</option>
-            </select>
-          </label>
-
-          <label className="input-label">
-            Governance Program ID
-            <input
-              className="text-input"
-              value={onchainGovernanceProgramId}
-              onChange={(event) => setOnchainGovernanceProgramId(event.target.value)}
-              required
-            />
-          </label>
-
-          <label className="input-label">
-            Authority Wallet
-            <input className="text-input" value={onchainAuthorityWallet} onChange={(event) => setOnchainAuthorityWallet(event.target.value)} required />
-          </label>
-
-          <label className="input-label">
-            Community Mint
-            <input className="text-input" value={onchainCommunityMint} onChange={(event) => setOnchainCommunityMint(event.target.value)} required />
-          </label>
-
-          <label className="input-label">
-            Council Mint (optional)
-            <input className="text-input" value={onchainCouncilMint} onChange={(event) => setOnchainCouncilMint(event.target.value)} />
-          </label>
-
-          <label className="input-label">
-            Description (optional)
-            <textarea className="text-input" value={onchainDescription} onChange={(event) => setOnchainDescription(event.target.value)} />
-          </label>
-
-          {onchainError ? <p className="error-text">{onchainError}</p> : null}
-          {onchainSuccess ? <p className="success-text">{onchainSuccess}</p> : null}
+        <div className="auth-mode-switch" role="tablist" aria-label="DAO setup mode">
           <button
             type="button"
-            className="primary-button"
-            disabled={isImporting || isCreatingOnchain}
-            onClick={() => {
-              void handleCreateOnchainDao();
-            }}
+            className={`tab-button${activeTab === 'onchain' ? ' tab-button-active' : ''}`}
+            onClick={() => setActiveTab('onchain')}
           >
-            {isCreatingOnchain ? 'Creating On-chain...' : 'Create On-chain Realm'}
+            Create On-chain Realm
           </button>
-        </form>
-      </article>
-
-      <article className="data-card">
-        <div className="data-card-header">
-          <h3>Import Existing Realm</h3>
-          <span className="status-chip">register</span>
+          <button
+            type="button"
+            className={`tab-button${activeTab === 'import' ? ' tab-button-active' : ''}`}
+            onClick={() => setActiveTab('import')}
+          >
+            Import Existing Realm
+          </button>
         </div>
-        <form className="auth-form" onSubmit={handleImportDao}>
-          <label className="input-label">
-            Name
-            <input className="text-input" value={importName} onChange={(event) => setImportName(event.target.value)} minLength={2} required />
-          </label>
 
-          <label className="input-label">
-            Network
-            <select className="select-input" value={importNetwork} onChange={(event) => setImportNetwork(event.target.value as 'mainnet-beta' | 'devnet')}>
-              <option value="devnet">devnet</option>
-              <option value="mainnet-beta">mainnet-beta</option>
-            </select>
-          </label>
+        {activeTab === 'onchain' ? (
+          <form className="auth-form" onSubmit={(event) => event.preventDefault()}>
+            <label className="input-label">
+              Name
+              <input className="text-input" value={onchainName} onChange={(event) => setOnchainName(event.target.value)} minLength={2} required />
+            </label>
 
-          <label className="input-label">
-            Realm Address
-            <input className="text-input" value={importRealmAddress} onChange={(event) => setImportRealmAddress(event.target.value)} required />
-          </label>
+            <label className="input-label">
+              Network
+              <select className="select-input" value={onchainNetwork} onChange={(event) => setOnchainNetwork(event.target.value as 'mainnet-beta' | 'devnet')}>
+                <option value="devnet">devnet</option>
+                <option value="mainnet-beta">mainnet-beta</option>
+              </select>
+            </label>
 
-          <label className="input-label">
-            Governance Program ID
-            <input
-              className="text-input"
-              value={importGovernanceProgramId}
-              onChange={(event) => setImportGovernanceProgramId(event.target.value)}
-              required
-            />
-          </label>
+            <label className="input-label">
+              Governance Program ID
+              <input
+                className="text-input"
+                value={onchainGovernanceProgramId}
+                onChange={(event) => setOnchainGovernanceProgramId(event.target.value)}
+                required
+              />
+            </label>
 
-          <label className="input-label">
-            Authority Wallet
-            <input className="text-input" value={importAuthorityWallet} onChange={(event) => setImportAuthorityWallet(event.target.value)} required />
-          </label>
+            <label className="input-label">
+              Authority Wallet
+              <input className="text-input" value={onchainAuthorityWallet} onChange={(event) => setOnchainAuthorityWallet(event.target.value)} required />
+            </label>
 
-          <label className="input-label">
-            Community Mint (optional)
-            <input className="text-input" value={importCommunityMint} onChange={(event) => setImportCommunityMint(event.target.value)} />
-          </label>
+            <label className="input-label">
+              Community Mint
+              <input className="text-input" value={onchainCommunityMint} onChange={(event) => setOnchainCommunityMint(event.target.value)} required />
+            </label>
 
-          <label className="input-label">
-            Council Mint (optional)
-            <input className="text-input" value={importCouncilMint} onChange={(event) => setImportCouncilMint(event.target.value)} />
-          </label>
+            <label className="input-label">
+              Council Mint (optional)
+              <input className="text-input" value={onchainCouncilMint} onChange={(event) => setOnchainCouncilMint(event.target.value)} />
+            </label>
 
-          <label className="input-label">
-            Description (optional)
-            <textarea className="text-input" value={importDescription} onChange={(event) => setImportDescription(event.target.value)} />
-          </label>
+            <label className="input-label">
+              Description (optional)
+              <textarea className="text-input" value={onchainDescription} onChange={(event) => setOnchainDescription(event.target.value)} />
+            </label>
 
-          {importError ? <p className="error-text">{importError}</p> : null}
-          {importSuccess ? <p className="success-text">{importSuccess}</p> : null}
+            {onchainError ? <p className="error-text">{onchainError}</p> : null}
+            {onchainSuccess ? <p className="success-text">{onchainSuccess}</p> : null}
+            <button
+              type="button"
+              className="primary-button"
+              disabled={isImporting || isCreatingOnchain}
+              onClick={() => {
+                void handleCreateOnchainDao();
+              }}
+            >
+              {isCreatingOnchain ? 'Creating On-chain...' : 'Create On-chain Realm'}
+            </button>
+          </form>
+        ) : (
+          <form className="auth-form" onSubmit={handleImportDao}>
+            <label className="input-label">
+              Name
+              <input className="text-input" value={importName} onChange={(event) => setImportName(event.target.value)} minLength={2} required />
+            </label>
 
-          <button type="submit" className="primary-button" disabled={isImporting || isCreatingOnchain}>
-            {isImporting ? 'Importing...' : 'Import Existing Realm'}
-          </button>
-        </form>
+            <label className="input-label">
+              Network
+              <select className="select-input" value={importNetwork} onChange={(event) => setImportNetwork(event.target.value as 'mainnet-beta' | 'devnet')}>
+                <option value="devnet">devnet</option>
+                <option value="mainnet-beta">mainnet-beta</option>
+              </select>
+            </label>
+
+            <label className="input-label">
+              Realm Address
+              <input className="text-input" value={importRealmAddress} onChange={(event) => setImportRealmAddress(event.target.value)} required />
+            </label>
+
+            <label className="input-label">
+              Governance Program ID
+              <input
+                className="text-input"
+                value={importGovernanceProgramId}
+                onChange={(event) => setImportGovernanceProgramId(event.target.value)}
+                required
+              />
+            </label>
+
+            <label className="input-label">
+              Authority Wallet
+              <input className="text-input" value={importAuthorityWallet} onChange={(event) => setImportAuthorityWallet(event.target.value)} required />
+            </label>
+
+            <label className="input-label">
+              Community Mint (optional)
+              <input className="text-input" value={importCommunityMint} onChange={(event) => setImportCommunityMint(event.target.value)} />
+            </label>
+
+            <label className="input-label">
+              Council Mint (optional)
+              <input className="text-input" value={importCouncilMint} onChange={(event) => setImportCouncilMint(event.target.value)} />
+            </label>
+
+            <label className="input-label">
+              Description (optional)
+              <textarea className="text-input" value={importDescription} onChange={(event) => setImportDescription(event.target.value)} />
+            </label>
+
+            {importError ? <p className="error-text">{importError}</p> : null}
+            {importSuccess ? <p className="success-text">{importSuccess}</p> : null}
+
+            <button type="submit" className="primary-button" disabled={isImporting || isCreatingOnchain}>
+              {isImporting ? 'Importing...' : 'Import Existing Realm'}
+            </button>
+          </form>
+        )}
       </article>
 
       {isLoading ? <LoadingState message="Loading DAOs..." /> : null}
