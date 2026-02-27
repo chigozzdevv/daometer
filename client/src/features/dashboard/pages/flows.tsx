@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/app/providers/auth-provider';
 import { createFlow, getDaos, getFlows, type DaoItem, type FlowGraph, type FlowItem } from '@/features/dashboard/api/api';
 import { FlowEditor } from '@/features/dashboard/components/flow-editor';
@@ -95,25 +95,6 @@ export const DashboardFlowsPage = (): JSX.Element => {
   }, [loadDaos, loadFlows]);
 
   const isLoading = isLoadingDaos || isLoadingFlows;
-
-  const activeFlow = useMemo(
-    () => flows.find((flow) => flow.id === activeFlowId) ?? null,
-    [flows, activeFlowId],
-  );
-  const alternateFlows = useMemo(
-    () => flows.filter((flow) => flow.id !== activeFlowId),
-    [flows, activeFlowId],
-  );
-
-  useEffect(() => {
-    if (alternateFlows.length === 0) {
-      return;
-    }
-
-    if (!openExistingFlowId || !alternateFlows.some((flow) => flow.id === openExistingFlowId)) {
-      setOpenExistingFlowId(alternateFlows[0].id);
-    }
-  }, [alternateFlows, openExistingFlowId]);
 
   const handleCreateFlow = async (): Promise<void> => {
     setError(null);
@@ -302,83 +283,16 @@ export const DashboardFlowsPage = (): JSX.Element => {
       ) : null}
 
       {!isLoading && !error && mode === 'builder' && activeFlowId && session?.accessToken ? (
-        <>
-          <article className="flow-step-card">
-            <header className="flow-step-head">
-              <span className="flow-step-index">Step 2</span>
-              <div>
-                <h2>Flow Builder</h2>
-                <p>{activeFlow ? `Editing ${activeFlow.name}` : 'Build your flow graph'}</p>
-              </div>
-            </header>
-
-            <div className="button-row">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => {
-                  setActiveFlowId(null);
-                  setMode('idle');
-                }}
-              >
-                Close Builder
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => {
-                  setDetailsName('');
-                  setDetailsDescription('');
-                  setMode('details');
-                }}
-              >
-                Create Another Flow
-              </button>
-              {alternateFlows.length > 0 ? (
-                <>
-                  <label className="input-label flow-inline-input">
-                    Open existing
-                    <select
-                      className="select-input"
-                      value={openExistingFlowId}
-                      onChange={(event) => setOpenExistingFlowId(event.target.value)}
-                    >
-                      {alternateFlows.map((flow) => (
-                        <option key={flow.id} value={flow.id}>
-                          {flow.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => {
-                      if (!openExistingFlowId || openExistingFlowId === activeFlowId) {
-                        return;
-                      }
-
-                      setActiveFlowId(openExistingFlowId);
-                    }}
-                  >
-                    Open
-                  </button>
-                </>
-              ) : null}
-            </div>
-          </article>
-
-          <FlowEditor
-            accessToken={session.accessToken}
-            flowId={activeFlowId}
-            onFlowSaved={() => {
-              void loadFlows();
-            }}
-            onFlowPublished={() => {
-              void loadFlows();
-            }}
-          />
-        </>
+        <FlowEditor
+          accessToken={session.accessToken}
+          flowId={activeFlowId}
+          onFlowSaved={() => {
+            void loadFlows();
+          }}
+          onFlowPublished={() => {
+            void loadFlows();
+          }}
+        />
       ) : null}
     </DashboardShell>
   );
