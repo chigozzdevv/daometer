@@ -42,6 +42,7 @@ const filterSchema = z.object({
   minRiskScore: z.number().int().min(0).max(100).nullable().optional(),
   maxRiskScore: z.number().int().min(0).max(100).nullable().optional(),
   onchainExecutionEnabled: z.boolean().nullable().optional(),
+  proposalId: objectIdSchema.nullable().optional(),
 });
 
 const conditionRuleSchema = z.object({
@@ -68,7 +69,7 @@ const workflowActionsSchema = z.object({
 
 export const createWorkflowRuleSchema = z.object({
   body: z.object({
-    daoId: objectIdSchema,
+    flowId: objectIdSchema,
     name: z.string().trim().min(2).max(120),
     description: z.string().trim().max(2000).optional(),
     enabled: z.boolean().default(true),
@@ -110,12 +111,23 @@ export const getWorkflowRuleSchema = z.object({
 export const listWorkflowRuleSchema = z.object({
   body: emptyObject,
   params: emptyObject,
-  query: z.object({
-    daoId: objectIdSchema,
-    enabled: z.coerce.boolean().optional(),
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(100).default(20),
-  }),
+  query: z
+    .object({
+      daoId: objectIdSchema.optional(),
+      flowId: objectIdSchema.optional(),
+      enabled: z.coerce.boolean().optional(),
+      page: z.coerce.number().int().min(1).default(1),
+      limit: z.coerce.number().int().min(1).max(100).default(20),
+    })
+    .superRefine((value, ctx) => {
+      if (!value.daoId && !value.flowId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['flowId'],
+          message: 'flowId or daoId is required',
+        });
+      }
+    }),
 });
 
 export const listWorkflowEventSchema = z.object({

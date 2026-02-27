@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import { ExecutionJobModel } from '@/features/execution-job/execution-job.model';
 import { scheduleExecutionJobFromProposal } from '@/features/execution-job/execution-job.service';
+import { FlowModel } from '@/features/flow/flow.model';
 import { ProposalModel, type ProposalDocument } from '@/features/proposal/proposal.model';
 import {
   WorkflowEventModel,
@@ -16,7 +17,7 @@ import { AppError } from '@/shared/errors/app-error';
 import { assertAdminUser, assertCanManageDao } from '@/shared/utils/authorization.util';
 
 type CreateWorkflowRuleInput = {
-  daoId: string;
+  flowId: string;
   name: string;
   description?: string;
   enabled?: boolean;
@@ -26,6 +27,7 @@ type CreateWorkflowRuleInput = {
     minRiskScore?: number | null;
     maxRiskScore?: number | null;
     onchainExecutionEnabled?: boolean | null;
+    proposalId?: string | null;
   };
   conditions?: WorkflowConditionGroup;
   actions: {
@@ -37,7 +39,8 @@ type CreateWorkflowRuleInput = {
 type UpdateWorkflowRuleInput = Partial<Omit<CreateWorkflowRuleInput, 'daoId'>>;
 
 type ListWorkflowRulesInput = {
-  daoId: string;
+  daoId?: string;
+  flowId?: string;
   enabled?: boolean;
   page: number;
   limit: number;
@@ -53,6 +56,7 @@ type WorkflowContext = {
   proposal: {
     id: string;
     title: string;
+    sourceFlowId: string | null;
     state: string;
     voteScope: string;
     riskScore: number;
@@ -138,6 +142,8 @@ const getConditionFieldValue = (field: string, context: WorkflowContext): unknow
       return context.metrics.hoursToHoldUpExpiry;
     case 'daoId':
       return context.daoId;
+    case 'sourceFlowId':
+      return context.proposal.sourceFlowId;
     default:
       return null;
   }
@@ -257,6 +263,7 @@ const buildProposalContext = (proposal: ProposalDocument, triggerType: string, t
     proposal: {
       id: proposal.id,
       title: proposal.title,
+      sourceFlowId: proposal.sourceFlowId ? proposal.sourceFlowId.toString() : null,
       state: proposal.state,
       voteScope: proposal.voteScope,
       riskScore: proposal.riskScore,
@@ -285,6 +292,7 @@ const buildProposalContext = (proposal: ProposalDocument, triggerType: string, t
 const buildProposalFilterForRule = (rule: WorkflowRuleDocument): Record<string, unknown> => {
   const filter: Record<string, unknown> = {
     daoId: rule.daoId,
+    sourceFlowId: rule.flowId,
   };
 
   if (rule.trigger.type === 'proposal-state-changed') {
@@ -320,6 +328,10 @@ const buildProposalFilterForRule = (rule: WorkflowRuleDocument): Record<string, 
 
   if (rule.filters.onchainExecutionEnabled !== null && rule.filters.onchainExecutionEnabled !== undefined) {
     filter['onchainExecution.enabled'] = rule.filters.onchainExecutionEnabled;
+  }
+
+  if (rule.filters.proposalId && Types.ObjectId.isValid(rule.filters.proposalId)) {
+    filter._id = new Types.ObjectId(rule.filters.proposalId);
   }
 
   return filter;
@@ -489,10 +501,17 @@ const finalizeWorkflowEvent = async (payload: {
 };
 
 export const createWorkflowRule = async (input: CreateWorkflowRuleInput, userId: Types.ObjectId): Promise<WorkflowRuleDocument> => {
-  await assertCanManageDao(input.daoId, userId);
+  const flow = await FlowModel.findById(input.flowId).select('daoId');
+
+  if (!flow) {
+    throw new AppError('Flow not found', 404, 'FLOW_NOT_FOUND');
+  }
+
+  await assertCanManageDao(flow.daoId, userId);
 
   return WorkflowRuleModel.create({
-    daoId: new Types.ObjectId(input.daoId),
+    daoId: flow.daoId,
+    flowId: flow._id,
     name: input.name,
     description: input.description ?? '',
     enabled: input.enabled ?? true,
@@ -502,6 +521,7 @@ export const createWorkflowRule = async (input: CreateWorkflowRuleInput, userId:
       minRiskScore: input.filters?.minRiskScore ?? null,
       maxRiskScore: input.filters?.maxRiskScore ?? null,
       onchainExecutionEnabled: input.filters?.onchainExecutionEnabled ?? null,
+      proposalId: input.filters?.proposalId ?? null,
     },
     conditions: input.conditions ?? {
       mode: 'all',
@@ -520,11 +540,23 @@ export const listWorkflowRules = async (
   items: WorkflowRuleDocument[];
   pagination: { page: number; limit: number; total: number; totalPages: number };
 }> => {
-  await assertCanManageDao(input.daoId, userId);
+  const filter: Record<string, unknown> = {};
 
-  const filter: Record<string, unknown> = {
-    daoId: new Types.ObjectId(input.daoId),
-  };
+  if (input.flowId) {
+    const flow = await FlowModel.findById(input.flowId).select('daoId');
+
+    if (!flow) {
+      throw new AppError('Flow not found', 404, 'FLOW_NOT_FOUND');
+    }
+
+    await assertCanManageDao(flow.daoId, userId);
+    filter.flowId = flow._id;
+  } else if (input.daoId) {
+    await assertCanManageDao(input.daoId, userId);
+    filter.daoId = new Types.ObjectId(input.daoId);
+  } else {
+    throw new AppError('flowId or daoId is required', 400, 'WORKFLOW_SCOPE_REQUIRED');
+  }
 
   if (typeof input.enabled === 'boolean') {
     filter.enabled = input.enabled;
@@ -594,6 +626,7 @@ export const updateWorkflowRule = async (
       minRiskScore: input.filters.minRiskScore ?? null,
       maxRiskScore: input.filters.maxRiskScore ?? null,
       onchainExecutionEnabled: input.filters.onchainExecutionEnabled ?? null,
+      proposalId: input.filters.proposalId ?? null,
     };
   }
 

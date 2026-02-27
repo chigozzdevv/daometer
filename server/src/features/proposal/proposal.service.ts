@@ -32,6 +32,7 @@ export type ProposalInstructionInput = {
 
 export type CreateProposalInput = {
   daoId: string;
+  sourceFlowId?: string;
   proposalAddress?: string;
   title: string;
   description?: string;
@@ -101,6 +102,7 @@ export const createProposal = async (input: CreateProposalInput, userId: Types.O
 
   const proposal = await ProposalModel.create({
     daoId: new Types.ObjectId(input.daoId),
+    sourceFlowId: input.sourceFlowId ? new Types.ObjectId(input.sourceFlowId) : null,
     proposalAddress: internalProposalAddress,
     title: input.title,
     description: input.description ?? '',

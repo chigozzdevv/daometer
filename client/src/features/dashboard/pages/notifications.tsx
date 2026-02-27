@@ -93,7 +93,7 @@ export const DashboardNotificationsPage = (): JSX.Element => {
       setError(null);
 
       try {
-        const loaded = await getWorkflows(selectedDaoId, session.accessToken, { limit: 100 });
+        const loaded = await getWorkflows({ daoId: selectedDaoId }, session.accessToken, { limit: 100 });
         if (!isMounted) return;
         setWorkflows(loaded);
         setSelectedWorkflowId(loaded[0]?.id ?? null);

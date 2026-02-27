@@ -67,6 +67,7 @@ const instructionSchema = z.object({
 export const createProposalSchema = z.object({
   body: z.object({
     daoId: z.string().trim().length(24),
+    sourceFlowId: z.string().trim().length(24).optional(),
     proposalAddress: z.string().trim().regex(base58Regex, 'Invalid proposal address').optional(),
     title: z.string().trim().min(3).max(200),
     description: z.string().trim().max(5000).optional(),

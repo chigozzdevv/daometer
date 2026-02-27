@@ -4,9 +4,11 @@ import {
   createWorkflow,
   getAuthProfile,
   getDaos,
+  getFlows,
   getWorkflows,
   updateWorkflow,
   type DaoItem,
+  type FlowItem,
   type WorkflowActionType,
   type WorkflowItem,
   type WorkflowProposalState,
@@ -44,8 +46,11 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
   const { session } = useAuth();
   const [allDaos, setAllDaos] = useState<DaoItem[]>([]);
   const [selectedDaoId, setSelectedDaoId] = useState<string | null>(null);
+  const [flows, setFlows] = useState<FlowItem[]>([]);
+  const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
   const [workflows, setWorkflows] = useState<WorkflowItem[]>([]);
   const [isLoadingDaos, setIsLoadingDaos] = useState(true);
+  const [isLoadingFlows, setIsLoadingFlows] = useState(true);
   const [isLoadingWorkflows, setIsLoadingWorkflows] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [isTogglingRuleId, setIsTogglingRuleId] = useState<string | null>(null);
@@ -71,6 +76,7 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
       if (!session?.accessToken) {
         setError('Sign in to load workflows.');
         setIsLoadingDaos(false);
+        setIsLoadingFlows(false);
         setIsLoadingWorkflows(false);
         return;
       }
@@ -90,6 +96,8 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
 
         if (managedDaos.length === 0) {
           setSelectedDaoId(null);
+          setSelectedFlowId(null);
+          setFlows([]);
           setWorkflows([]);
           return;
         }
@@ -122,6 +130,49 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
 
   useEffect(() => {
     if (!session?.accessToken || !selectedDaoId) {
+      setFlows([]);
+      setSelectedFlowId(null);
+      setIsLoadingFlows(false);
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadFlows = async (): Promise<void> => {
+      setIsLoadingFlows(true);
+      setError(null);
+
+      try {
+        const loaded = await getFlows({ daoId: selectedDaoId, limit: 100 });
+
+        if (!isMounted) {
+          return;
+        }
+
+        setFlows(loaded);
+        setSelectedFlowId((current) => (current && loaded.some((flow) => flow.id === current) ? current : loaded[0]?.id ?? null));
+      } catch (loadError) {
+        if (!isMounted) {
+          return;
+        }
+
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load flows');
+      } finally {
+        if (isMounted) {
+          setIsLoadingFlows(false);
+        }
+      }
+    };
+
+    void loadFlows();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedDaoId, session?.accessToken]);
+
+  useEffect(() => {
+    if (!session?.accessToken || !selectedFlowId) {
       setWorkflows([]);
       setIsLoadingWorkflows(false);
       return;
@@ -134,7 +185,7 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
       setError(null);
 
       try {
-        const rules = await getWorkflows(selectedDaoId, session.accessToken, { limit: 100 });
+        const rules = await getWorkflows({ flowId: selectedFlowId }, session.accessToken, { limit: 100 });
 
         if (!isMounted) {
           return;
@@ -163,10 +214,10 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
     return () => {
       isMounted = false;
     };
-  }, [selectedDaoId, session?.accessToken]);
+  }, [selectedFlowId, session?.accessToken]);
 
   const enabledCount = useMemo(() => workflows.filter((workflow) => workflow.enabled).length, [workflows]);
-  const isLoading = isLoadingDaos || isLoadingWorkflows;
+  const isLoading = isLoadingDaos || isLoadingFlows || isLoadingWorkflows;
 
   const toggleSelectedAction = (action: WorkflowActionType): void => {
     setSelectedActions((current) =>
@@ -183,8 +234,8 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
       return;
     }
 
-    if (!selectedDaoId) {
-      setError('Select a DAO first.');
+    if (!selectedFlowId) {
+      setError('Select a flow first.');
       return;
     }
 
@@ -256,7 +307,7 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
     try {
       const created = await createWorkflow(
         {
-          daoId: selectedDaoId,
+          flowId: selectedFlowId,
           name: ruleName.trim(),
           description: ruleDescription.trim() || undefined,
           enabled: true,
@@ -315,6 +366,24 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
   return (
     <DashboardShell title="Workflows" description="Create rule-based automations for proposal reminders, approvals, and execution.">
       <DaoSelect daos={allDaos} selectedDaoId={selectedDaoId} onSelect={setSelectedDaoId} />
+      {allDaos.length > 0 ? (
+        <label className="input-label inline-select">
+          <span>Flow</span>
+          <select
+            className="select-input"
+            value={selectedFlowId ?? ''}
+            onChange={(event) => setSelectedFlowId(event.target.value || null)}
+            disabled={flows.length === 0}
+          >
+            {flows.length === 0 ? <option value="">No flows</option> : null}
+            {flows.map((flow) => (
+              <option key={flow.id} value={flow.id}>
+                {flow.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
 
       {success ? <p className="success-text">{success}</p> : null}
       {isLoading ? <LoadingState message="Loading workflows..." /> : null}
@@ -323,7 +392,7 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
         <EmptyState message="You are not managing any DAO yet, so no workflows are available." />
       ) : null}
 
-      {!isLoading && !error && allDaos.length > 0 ? (
+      {!isLoading && !error && allDaos.length > 0 && selectedFlowId ? (
         <article className="flow-step-card">
           <header className="flow-step-head">
             <span className="flow-step-index">Rule</span>
@@ -455,8 +524,12 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
         </article>
       ) : null}
 
-      {!isLoading && !error && workflows.length === 0 && allDaos.length > 0 ? (
-        <EmptyState message="No workflow rules found for the selected DAO." />
+      {!isLoading && !error && allDaos.length > 0 && flows.length === 0 ? (
+        <EmptyState message="No flows found for this DAO. Create a flow first." />
+      ) : null}
+
+      {!isLoading && !error && workflows.length === 0 && allDaos.length > 0 && selectedFlowId ? (
+        <EmptyState message="No workflow rules found for the selected flow." />
       ) : null}
 
       {!isLoading && !error && workflows.length > 0 ? (

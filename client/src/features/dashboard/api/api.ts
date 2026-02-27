@@ -302,6 +302,7 @@ export type WorkflowActionType = 'send-email' | 'enqueue-execution' | 'set-manua
 export type WorkflowItem = {
   id: string;
   daoId: string;
+  flowId: string;
   name: string;
   description: string;
   enabled: boolean;
@@ -327,7 +328,7 @@ export type WorkflowItem = {
 };
 
 export type CreateWorkflowInput = {
-  daoId: string;
+  flowId: string;
   name: string;
   description?: string;
   enabled?: boolean;
@@ -341,6 +342,7 @@ export type CreateWorkflowInput = {
     minRiskScore?: number | null;
     maxRiskScore?: number | null;
     onchainExecutionEnabled?: boolean | null;
+    proposalId?: string | null;
   };
   conditions?: {
     mode: 'all' | 'any';
@@ -364,7 +366,7 @@ export type CreateWorkflowInput = {
   };
 };
 
-export type UpdateWorkflowInput = Partial<Omit<CreateWorkflowInput, 'daoId'>>;
+export type UpdateWorkflowInput = Partial<Omit<CreateWorkflowInput, 'flowId'>>;
 
 export type WorkflowEventItem = {
   id: string;
@@ -807,13 +809,14 @@ export const prepareProposalOnchainExecution = async (
   });
 
 export const getWorkflows = async (
-  daoId: string,
+  scope: { daoId?: string; flowId?: string },
   accessToken: string,
   options: ListOptions & { enabled?: boolean } = {},
 ): Promise<WorkflowItem[]> =>
   apiRequest<WorkflowItem[]>(
     `/workflows${buildQuery({
-      daoId,
+      daoId: scope.daoId,
+      flowId: scope.flowId,
       enabled: options.enabled,
       page: options.page ?? 1,
       limit: options.limit ?? 100,

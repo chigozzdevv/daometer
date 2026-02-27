@@ -382,6 +382,7 @@ export const publishFlow = async (
 
   const proposalInput: CreateProposalInput = {
     daoId: flow.daoId.toString(),
+    sourceFlowId: flow.id,
     proposalAddress,
     title: input.title ?? `${proposalDefaults.titlePrefix}: ${flow.name} v${flow.version}`,
     description: input.description ?? flow.description,

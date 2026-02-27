@@ -58,7 +58,7 @@ export const DashboardOverviewPage = (): JSX.Element => {
 
           const workflowLists = await Promise.all(
             managedDaos.map((dao) =>
-              getWorkflows(dao.id, session.accessToken).catch((workflowError) => {
+              getWorkflows({ daoId: dao.id }, session.accessToken).catch((workflowError) => {
                 if (workflowError instanceof ApiRequestError && workflowError.status === 403) {
                   return [];
                 }

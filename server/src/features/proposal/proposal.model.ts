@@ -55,6 +55,7 @@ export interface ProposalManualApproval {
 
 export interface Proposal {
   daoId: Types.ObjectId;
+  sourceFlowId: Types.ObjectId | null;
   proposalAddress: string;
   title: string;
   description: string;
@@ -242,6 +243,13 @@ const proposalSchema = new Schema<Proposal>(
       ref: 'Dao',
       index: true,
     },
+    sourceFlowId: {
+      type: Schema.Types.ObjectId,
+      required: false,
+      ref: 'Flow',
+      default: null,
+      index: true,
+    },
     proposalAddress: {
       type: String,
       required: true,
@@ -375,6 +383,7 @@ const proposalSchema = new Schema<Proposal>(
 
 proposalSchema.index({ daoId: 1, createdAt: -1 });
 proposalSchema.index({ daoId: 1, state: 1, votingEndsAt: 1 });
+proposalSchema.index({ sourceFlowId: 1, state: 1, votingEndsAt: 1 });
 
 export type ProposalDocument = HydratedDocument<Proposal>;
 

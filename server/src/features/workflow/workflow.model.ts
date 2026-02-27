@@ -20,6 +20,7 @@ export const workflowConditionFields = [
   'hoursToVotingEnd',
   'hoursToHoldUpExpiry',
   'daoId',
+  'sourceFlowId',
 ] as const;
 export type WorkflowConditionField = (typeof workflowConditionFields)[number];
 
@@ -40,6 +41,7 @@ export interface WorkflowFilter {
   minRiskScore: number | null;
   maxRiskScore: number | null;
   onchainExecutionEnabled: boolean | null;
+  proposalId: string | null;
 }
 
 export interface WorkflowConditionRule {
@@ -61,6 +63,7 @@ export interface WorkflowAction {
 
 export interface WorkflowRule {
   daoId: Types.ObjectId;
+  flowId: Types.ObjectId;
   name: string;
   description: string;
   enabled: boolean;
@@ -144,6 +147,11 @@ const workflowFilterSchema = new Schema<WorkflowFilter>(
       type: Boolean,
       default: null,
     },
+    proposalId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
   },
   { _id: false },
 );
@@ -210,6 +218,12 @@ const workflowRuleSchema = new Schema<WorkflowRule>(
       ref: 'Dao',
       index: true,
     },
+    flowId: {
+      type: Schema.Types.ObjectId,
+      required: true,
+      ref: 'Flow',
+      index: true,
+    },
     name: {
       type: String,
       required: true,
@@ -239,6 +253,7 @@ const workflowRuleSchema = new Schema<WorkflowRule>(
         minRiskScore: null,
         maxRiskScore: null,
         onchainExecutionEnabled: null,
+        proposalId: null,
       }),
     },
     conditions: {
@@ -288,6 +303,7 @@ const workflowRuleSchema = new Schema<WorkflowRule>(
 
 workflowRuleSchema.index({ daoId: 1, name: 1 }, { unique: true });
 workflowRuleSchema.index({ daoId: 1, enabled: 1 });
+workflowRuleSchema.index({ flowId: 1, enabled: 1 });
 
 const workflowActionResultSchema = new Schema<WorkflowActionResult>(
   {
