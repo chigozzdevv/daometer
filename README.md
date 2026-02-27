@@ -104,12 +104,10 @@ Configured by `API_PREFIX` (default: `/api/v1`).
 - `POST /api/v1/flows/compile-inline`
 - `POST /api/v1/flows/:flowId/compile`
 - `POST /api/v1/flows/:flowId/publish`
-- `POST /api/v1/proposals`
 - `GET /api/v1/proposals/dao/:daoId`
 - `GET /api/v1/proposals/:proposalId`
 - `PATCH /api/v1/proposals/:proposalId/state`
 - `PATCH /api/v1/proposals/:proposalId/onchain-execution`
-- `POST /api/v1/proposals/:proposalId/onchain-create`
 - `POST /api/v1/proposals/:proposalId/onchain-sync`
 - `POST /api/v1/proposals/:proposalId/manual-approval`
 - `GET /api/v1/execution-jobs`
@@ -157,9 +155,7 @@ Drag-and-drop is represented server-side as persisted `blocks` in the Flow featu
 1. Create a `flow` with drag-and-drop blocks.
 2. Compile and publish flow to an internal proposal record.
    - Publish can optionally include `onchainCreate` to create the Realms proposal immediately.
-3. Create onchain proposal from the stored compiled instructions:
-   - `POST /api/v1/proposals/:proposalId/onchain-create`
-4. Worker monitors proposal state and executes onchain transactions after success + hold-up.
+3. Worker monitors proposal state and executes onchain transactions after success + hold-up.
 
 ## Workflow Rules (If/Else + Timing + Actions)
 

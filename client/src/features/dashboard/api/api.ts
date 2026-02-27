@@ -144,53 +144,16 @@ export type ProposalItem = {
   updatedAt: string;
 };
 
-export type CreateProposalInput = {
-  daoId: string;
-  title: string;
-  description?: string;
-  voteScope?: 'community' | 'council';
-  state?: 'draft' | 'voting';
-  holdUpSeconds?: number;
-  votingEndsAt: string;
-  instructions: Array<{
-    index: number;
-    kind: 'transfer' | 'config' | 'program-upgrade' | 'stream' | 'custom';
-    label: string;
-    programId: string;
-    accounts: string[];
-    accountMetas?: Array<{
-      pubkey: string;
-      isSigner: boolean;
-      isWritable: boolean;
-    }>;
-    dataBase64?: string;
-    riskScore: number;
-  }>;
-  automation?: {
-    autoExecute?: boolean;
-    executeAfterHoldUp?: boolean;
-    maxRiskScore?: number;
-  };
-};
-
-export type CreateProposalOnchainInput = {
-  governanceProgramId?: string;
-  programVersion: number;
-  realmAddress: string;
-  governanceAddress: string;
-  governingTokenMint: string;
-  descriptionLink?: string;
-  optionIndex?: number;
-  useDenyOption?: boolean;
-  rpcUrl?: string;
-  signOff?: boolean;
-  requireSimulation?: boolean;
-};
-
-export type CreateProposalOnchainResult = {
-  proposal: ProposalItem;
-  signatures: string[];
-};
+export type WorkflowTriggerType = 'proposal-state-changed' | 'voting-ends-in' | 'hold-up-expires-in';
+export type WorkflowProposalState =
+  | 'draft'
+  | 'voting'
+  | 'succeeded'
+  | 'defeated'
+  | 'cancelled'
+  | 'executed'
+  | 'execution-error';
+export type WorkflowActionType = 'send-email' | 'enqueue-execution' | 'set-manual-approval' | 'execute-now';
 
 export type WorkflowItem = {
   id: string;
@@ -199,19 +162,65 @@ export type WorkflowItem = {
   description: string;
   enabled: boolean;
   trigger: {
-    type: 'proposal-state-changed' | 'voting-ends-in' | 'hold-up-expires-in';
-    states: Array<
-      'draft' | 'voting' | 'succeeded' | 'defeated' | 'cancelled' | 'executed' | 'execution-error'
-    >;
+    type: WorkflowTriggerType;
+    states: WorkflowProposalState[];
     offsetMinutes: number;
   };
+  conditions: {
+    mode: 'all' | 'any';
+    rules: Array<{
+      field: string;
+      operator: string;
+      value: unknown;
+    }>;
+  };
   actions: {
-    onTrue: Array<{ type: string; enabled: boolean }>;
-    onFalse: Array<{ type: string; enabled: boolean }>;
+    onTrue: Array<{ type: WorkflowActionType; enabled: boolean; config?: Record<string, unknown> }>;
+    onFalse: Array<{ type: WorkflowActionType; enabled: boolean; config?: Record<string, unknown> }>;
   };
   createdAt: string;
   updatedAt: string;
 };
+
+export type CreateWorkflowInput = {
+  daoId: string;
+  name: string;
+  description?: string;
+  enabled?: boolean;
+  trigger: {
+    type: WorkflowTriggerType;
+    states: WorkflowProposalState[];
+    offsetMinutes: number;
+  };
+  filters?: {
+    voteScope?: 'community' | 'council' | null;
+    minRiskScore?: number | null;
+    maxRiskScore?: number | null;
+    onchainExecutionEnabled?: boolean | null;
+  };
+  conditions?: {
+    mode: 'all' | 'any';
+    rules: Array<{
+      field: string;
+      operator: string;
+      value: unknown;
+    }>;
+  };
+  actions: {
+    onTrue: Array<{
+      type: WorkflowActionType;
+      enabled: boolean;
+      config: Record<string, unknown>;
+    }>;
+    onFalse: Array<{
+      type: WorkflowActionType;
+      enabled: boolean;
+      config: Record<string, unknown>;
+    }>;
+  };
+};
+
+export type UpdateWorkflowInput = Partial<Omit<CreateWorkflowInput, 'daoId'>>;
 
 export type WorkflowEventItem = {
   id: string;
@@ -532,33 +541,6 @@ export const getDaoProposals = async (daoId: string, options: ProposalListOption
     })}`,
   );
 
-export const createProposal = async (
-  input: CreateProposalInput,
-  accessToken: string,
-): Promise<ProposalItem> =>
-  apiRequest<ProposalItem>('/proposals', {
-    method: 'POST',
-    body: input as unknown as Record<string, unknown>,
-    accessToken,
-  });
-
-export const createProposalOnchain = async (
-  proposalId: string,
-  input: CreateProposalOnchainInput,
-  accessToken: string,
-): Promise<CreateProposalOnchainResult> =>
-  apiRequest<CreateProposalOnchainResult>(`/proposals/${proposalId}/onchain-create`, {
-    method: 'POST',
-    body: {
-      ...input,
-      optionIndex: input.optionIndex ?? 0,
-      useDenyOption: input.useDenyOption ?? true,
-      signOff: input.signOff ?? true,
-      requireSimulation: input.requireSimulation ?? true,
-    },
-    accessToken,
-  });
-
 export const getWorkflows = async (
   daoId: string,
   accessToken: string,
@@ -575,6 +557,27 @@ export const getWorkflows = async (
       accessToken,
     },
   );
+
+export const createWorkflow = async (
+  input: CreateWorkflowInput,
+  accessToken: string,
+): Promise<WorkflowItem> =>
+  apiRequest<WorkflowItem>('/workflows', {
+    method: 'POST',
+    body: input as unknown as Record<string, unknown>,
+    accessToken,
+  });
+
+export const updateWorkflow = async (
+  workflowRuleId: string,
+  input: UpdateWorkflowInput,
+  accessToken: string,
+): Promise<WorkflowItem> =>
+  apiRequest<WorkflowItem>(`/workflows/${workflowRuleId}`, {
+    method: 'PATCH',
+    body: input as unknown as Record<string, unknown>,
+    accessToken,
+  });
 
 export const getWorkflowEvents = async (
   workflowRuleId: string,

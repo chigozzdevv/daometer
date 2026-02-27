@@ -1,8 +1,6 @@
 import { Router } from 'express';
 import * as proposalController from '@/features/proposal/proposal.controller';
 import {
-  createProposalOnchainSchema,
-  createProposalSchema,
   decideProposalManualApprovalSchema,
   getProposalSchema,
   listProposalSchema,
@@ -15,7 +13,6 @@ import { validateRequest } from '@/shared/middlewares/validate-request.middlewar
 
 export const proposalRouter = Router();
 
-proposalRouter.post('/', requireAuth, validateRequest(createProposalSchema), proposalController.create);
 proposalRouter.get('/dao/:daoId', validateRequest(listProposalSchema), proposalController.listByDao);
 proposalRouter.get('/:proposalId', validateRequest(getProposalSchema), proposalController.getById);
 proposalRouter.patch(
@@ -29,12 +26,6 @@ proposalRouter.patch(
   requireAuth,
   validateRequest(updateProposalOnchainExecutionSchema),
   proposalController.updateOnchainExecution,
-);
-proposalRouter.post(
-  '/:proposalId/onchain-create',
-  requireAuth,
-  validateRequest(createProposalOnchainSchema),
-  proposalController.createOnchain,
 );
 proposalRouter.post(
   '/:proposalId/onchain-sync',
