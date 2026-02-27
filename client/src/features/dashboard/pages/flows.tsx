@@ -144,8 +144,7 @@ export const DashboardFlowsPage = (): JSX.Element => {
 
       {!isLoading && !error && mode === 'idle' ? (
         <article className="flow-step-card">
-          <header className="flow-step-head">
-            <span className="flow-step-index">Start</span>
+          <header className="editor-header">
             <div>
               <h2>No Flow Open</h2>
               <p>Create a new flow or open an existing one.</p>
