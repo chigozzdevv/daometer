@@ -194,7 +194,7 @@ export const DashboardProposalsPage = (): JSX.Element => {
     <DashboardShell title="Proposals" description="Real proposal states, risk, and execution metadata by DAO.">
       <DaoSelect daos={daos} selectedDaoId={selectedDaoId} onSelect={setSelectedDaoId} />
 
-      {selectedDao ? (
+      {selectedDao && !isLoading && !error && proposals.length > 0 ? (
         <div className="dao-card-actions">
           <button
             type="button"
