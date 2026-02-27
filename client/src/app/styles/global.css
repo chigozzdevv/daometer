@@ -752,6 +752,7 @@ p {
   gap: 0.35rem;
   font-size: 0.92rem;
   font-weight: 600;
+  min-width: 0;
 }
 
 .text-input {
@@ -763,6 +764,9 @@ p {
   padding: 0.65rem 0.75rem;
   border-radius: 0;
   outline: none;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .input-with-action {
@@ -1085,6 +1089,9 @@ p {
   font-size: 0.95rem;
   color: var(--black);
   padding: 0.62rem 0.7rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .data-grid {
@@ -1340,6 +1347,10 @@ p {
 .form-grid {
   display: grid;
   gap: 0.65rem;
+}
+
+.form-grid > * {
+  min-width: 0;
 }
 
 .form-grid.two-col {
