@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import {
-  compileFlowById,
   compileInlineFlow,
   createFlow,
   getFlowById,
@@ -8,6 +7,9 @@ import {
   type DaoItem,
   type FlowBlockInput,
   type FlowCompilationResult,
+  type FlowGraph,
+  type FlowGraphEdge,
+  type FlowGraphNode,
   type FlowItem,
   type FlowProposalDefaults,
   type PublishFlowResult,
@@ -16,6 +18,8 @@ import {
 import { formatDateTime } from '@/features/dashboard/lib/format';
 
 const newFlowKey = '__new-flow';
+const canvasNodeWidth = 360;
+const canvasNodeHeight = 210;
 
 type SupportedBlockType =
   | 'transfer-sol'
@@ -46,6 +50,24 @@ const defaultProposalDefaults: FlowProposalDefaults = {
 };
 
 const makeBlockId = (): string => `block-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const makeEdgeId = (sourceId: string, targetId: string, index: number): string =>
+  `edge-${sourceId.slice(-4)}-${targetId.slice(-4)}-${index}`;
+
+const getDefaultNodePosition = (index: number): { x: number; y: number } => ({
+  x: 40 + (index % 3) * 420,
+  y: 40 + Math.floor(index / 3) * 260,
+});
+
+const createInitialBlocks = (): FlowBlockInput[] => [
+  {
+    id: makeBlockId(),
+    type: 'transfer-sol',
+    label: 'Treasury transfer',
+    fromGovernance: '',
+    toWallet: '',
+    lamports: 1_000_000,
+  },
+];
 
 const defaultBlockForType = (type: SupportedBlockType): FlowBlockInput => {
   if (type === 'transfer-sol') {
@@ -127,7 +149,157 @@ const defaultBlockForType = (type: SupportedBlockType): FlowBlockInput => {
   };
 };
 
-const defaultBlocks: FlowBlockInput[] = [defaultBlockForType('transfer-sol')];
+const deriveGraphFromBlocks = (blocks: FlowBlockInput[]): FlowGraph => {
+  const nodes: FlowGraphNode[] = blocks.map((block, index) => {
+    const blockId = getString(block.id, makeBlockId());
+    const { x, y } = getDefaultNodePosition(index);
+    return { id: blockId, x, y };
+  });
+
+  const edges: FlowGraphEdge[] = blocks
+    .map((block, index) => {
+      if (index >= blocks.length - 1) {
+        return null;
+      }
+
+      const sourceId = getString(block.id);
+      const targetId = getString(blocks[index + 1]?.id);
+
+      if (!sourceId || !targetId) {
+        return null;
+      }
+
+      return {
+        id: makeEdgeId(sourceId, targetId, index),
+        source: sourceId,
+        target: targetId,
+      };
+    })
+    .filter((edge): edge is FlowGraphEdge => Boolean(edge));
+
+  return { nodes, edges };
+};
+
+const normalizeGraphForBlocks = (
+  blocks: FlowBlockInput[],
+  graphNodes: FlowGraphNode[],
+  graphEdges: FlowGraphEdge[],
+): FlowGraph => {
+  const blockIds = blocks.map((block) => getString(block.id)).filter(Boolean);
+  const blockIdSet = new Set(blockIds);
+  const uniqueNodes = new Map<string, FlowGraphNode>();
+
+  graphNodes.forEach((node) => {
+    if (!blockIdSet.has(node.id) || uniqueNodes.has(node.id)) {
+      return;
+    }
+
+    uniqueNodes.set(node.id, {
+      id: node.id,
+      x: Number.isFinite(node.x) ? Math.max(0, node.x) : 0,
+      y: Number.isFinite(node.y) ? Math.max(0, node.y) : 0,
+    });
+  });
+
+  const nodes: FlowGraphNode[] = blockIds.map((id, index) => {
+    const existing = uniqueNodes.get(id);
+
+    if (existing) {
+      return existing;
+    }
+
+    const { x, y } = getDefaultNodePosition(index);
+    return { id, x, y };
+  });
+
+  const edgeKeys = new Set<string>();
+  const edges: FlowGraphEdge[] = [];
+
+  graphEdges.forEach((edge, index) => {
+    if (!blockIdSet.has(edge.source) || !blockIdSet.has(edge.target) || edge.source === edge.target) {
+      return;
+    }
+
+    const edgeKey = `${edge.source}->${edge.target}`;
+
+    if (edgeKeys.has(edgeKey)) {
+      return;
+    }
+
+    edgeKeys.add(edgeKey);
+    edges.push({
+      id: edge.id || makeEdgeId(edge.source, edge.target, index),
+      source: edge.source,
+      target: edge.target,
+    });
+  });
+
+  return { nodes, edges };
+};
+
+const topologicalSortBlocks = (blocks: FlowBlockInput[], edges: FlowGraphEdge[]): FlowBlockInput[] => {
+  const blockIds = blocks.map((block) => getString(block.id));
+  const blockMap = new Map(blocks.map((block) => [getString(block.id), block]));
+  const indexMap = new Map(blockIds.map((id, index) => [id, index]));
+  const adjacency = new Map<string, Set<string>>();
+  const inDegree = new Map<string, number>();
+
+  blockIds.forEach((id) => {
+    adjacency.set(id, new Set<string>());
+    inDegree.set(id, 0);
+  });
+
+  edges.forEach((edge) => {
+    if (!indexMap.has(edge.source) || !indexMap.has(edge.target) || edge.source === edge.target) {
+      return;
+    }
+
+    const neighbours = adjacency.get(edge.source);
+
+    if (!neighbours || neighbours.has(edge.target)) {
+      return;
+    }
+
+    neighbours.add(edge.target);
+    inDegree.set(edge.target, (inDegree.get(edge.target) ?? 0) + 1);
+  });
+
+  const queue = blockIds
+    .filter((id) => (inDegree.get(id) ?? 0) === 0)
+    .sort((left, right) => (indexMap.get(left) ?? 0) - (indexMap.get(right) ?? 0));
+
+  const orderedIds: string[] = [];
+
+  while (queue.length > 0) {
+    const nextId = queue.shift();
+
+    if (!nextId) {
+      break;
+    }
+
+    orderedIds.push(nextId);
+
+    const neighbours = [...(adjacency.get(nextId) ?? [])].sort(
+      (left, right) => (indexMap.get(left) ?? 0) - (indexMap.get(right) ?? 0),
+    );
+
+    neighbours.forEach((targetId) => {
+      const nextInDegree = (inDegree.get(targetId) ?? 0) - 1;
+      inDegree.set(targetId, nextInDegree);
+
+      if (nextInDegree === 0) {
+        queue.push(targetId);
+        queue.sort((left, right) => (indexMap.get(left) ?? 0) - (indexMap.get(right) ?? 0));
+      }
+    });
+  }
+
+  if (orderedIds.length !== blocks.length) {
+    throw new Error('Flow contains circular links. Remove the cycle before saving or publishing.');
+  }
+
+  return orderedIds.map((id) => blockMap.get(id)).filter((block): block is FlowBlockInput => Boolean(block));
+};
 
 const parseJson = <TValue,>(raw: string, label: string): TValue => {
   try {
@@ -171,19 +343,7 @@ const getNumber = (value: unknown, fallback = 0): number => {
 const getBoolean = (value: unknown, fallback = false): boolean =>
   typeof value === 'boolean' ? value : fallback;
 
-const reorderBlocks = (blocks: FlowBlockInput[], sourceId: string, targetId: string): FlowBlockInput[] => {
-  const sourceIndex = blocks.findIndex((block) => getString(block.id) === sourceId);
-  const targetIndex = blocks.findIndex((block) => getString(block.id) === targetId);
-
-  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) {
-    return blocks;
-  }
-
-  const next = [...blocks];
-  const [sourceBlock] = next.splice(sourceIndex, 1);
-  next.splice(targetIndex, 0, sourceBlock);
-  return next;
-};
+const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max);
 
 type FlowEditorProps = {
   accessToken: string;
@@ -202,12 +362,15 @@ export const FlowEditor = ({
   onFlowSaved,
   onFlowPublished,
 }: FlowEditorProps): JSX.Element => {
+  const initialBlocks = useMemo(() => createInitialBlocks(), []);
+  const initialGraph = useMemo(() => deriveGraphFromBlocks(initialBlocks), [initialBlocks]);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+
   const [activeFlowId, setActiveFlowId] = useState<string>(newFlowKey);
   const [isLoadingFlow, setIsLoadingFlow] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isCompiling, setIsCompiling] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
-  const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -215,7 +378,16 @@ export const FlowEditor = ({
   const [description, setDescription] = useState('');
   const [tagsInput, setTagsInput] = useState('');
   const [status, setStatus] = useState<'draft' | 'published' | 'archived'>('draft');
-  const [blocks, setBlocks] = useState<FlowBlockInput[]>(defaultBlocks);
+  const [blocks, setBlocks] = useState<FlowBlockInput[]>(initialBlocks);
+  const [graphNodes, setGraphNodes] = useState<FlowGraphNode[]>(initialGraph.nodes);
+  const [graphEdges, setGraphEdges] = useState<FlowGraphEdge[]>(initialGraph.edges);
+  const [pendingLinkSourceId, setPendingLinkSourceId] = useState<string | null>(null);
+
+  const [draggingNode, setDraggingNode] = useState<{
+    nodeId: string;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
 
   const [titlePrefix, setTitlePrefix] = useState(defaultProposalDefaults.titlePrefix);
   const [proposalVoteScope, setProposalVoteScope] = useState<'community' | 'council'>(defaultProposalDefaults.voteScope);
@@ -261,6 +433,50 @@ export const FlowEditor = ({
 
   const selectedDao = useMemo(() => daos.find((dao) => dao.id === selectedDaoId) ?? null, [daos, selectedDaoId]);
 
+  const graphNodeMap = useMemo(() => new Map(graphNodes.map((node) => [node.id, node])), [graphNodes]);
+
+  const orderingPreview = useMemo(() => {
+    try {
+      return {
+        ids: topologicalSortBlocks(blocks, graphEdges).map((block) => getString(block.id)),
+        error: null,
+      };
+    } catch (orderingError) {
+      return {
+        ids: blocks.map((block) => getString(block.id)),
+        error: orderingError instanceof Error ? orderingError.message : 'Invalid flow links',
+      };
+    }
+  }, [blocks, graphEdges]);
+
+  const edgePaths = useMemo(
+    () =>
+      graphEdges
+        .map((edge) => {
+          const sourceNode = graphNodeMap.get(edge.source);
+          const targetNode = graphNodeMap.get(edge.target);
+
+          if (!sourceNode || !targetNode) {
+            return null;
+          }
+
+          const startX = sourceNode.x + canvasNodeWidth - 8;
+          const startY = sourceNode.y + 58;
+          const endX = targetNode.x + 8;
+          const endY = targetNode.y + 58;
+          const bendOffset = Math.max(60, Math.abs(endX - startX) * 0.35);
+          const controlX1 = startX + bendOffset;
+          const controlX2 = endX - bendOffset;
+
+          return {
+            id: edge.id,
+            path: `M ${startX} ${startY} C ${controlX1} ${startY}, ${controlX2} ${endY}, ${endX} ${endY}`,
+          };
+        })
+        .filter((item): item is { id: string; path: string } => Boolean(item)),
+    [graphEdges, graphNodeMap],
+  );
+
   useEffect(() => {
     if (!selectedDao) {
       return;
@@ -271,13 +487,63 @@ export const FlowEditor = ({
     setOnchainGoverningTokenMint((current) => current || selectedDao.communityMint || '');
   }, [selectedDao]);
 
+  useEffect(() => {
+    if (!draggingNode) {
+      return;
+    }
+
+    const handleMove = (event: MouseEvent): void => {
+      const board = canvasRef.current;
+
+      if (!board) {
+        return;
+      }
+
+      const rect = board.getBoundingClientRect();
+      const maxX = Math.max(8, rect.width - canvasNodeWidth - 8);
+      const maxY = Math.max(8, rect.height - canvasNodeHeight - 8);
+      const nextX = clamp(event.clientX - rect.left - draggingNode.offsetX, 8, maxX);
+      const nextY = clamp(event.clientY - rect.top - draggingNode.offsetY, 8, maxY);
+
+      setGraphNodes((current) =>
+        current.map((node) =>
+          node.id === draggingNode.nodeId
+            ? {
+                ...node,
+                x: nextX,
+                y: nextY,
+              }
+            : node,
+        ),
+      );
+    };
+
+    const handleUp = (): void => {
+      setDraggingNode(null);
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, [draggingNode]);
+
   const resetForNewFlow = (): void => {
+    const nextBlocks = createInitialBlocks();
+    const nextGraph = deriveGraphFromBlocks(nextBlocks);
+
     setActiveFlowId(newFlowKey);
     setName('');
     setDescription('');
     setTagsInput('');
     setStatus('draft');
-    setBlocks(defaultBlocks);
+    setBlocks(nextBlocks);
+    setGraphNodes(nextGraph.nodes);
+    setGraphEdges(nextGraph.edges);
+    setPendingLinkSourceId(null);
     setTitlePrefix(defaultProposalDefaults.titlePrefix);
     setProposalVoteScope(defaultProposalDefaults.voteScope);
     setProposalState(defaultProposalDefaults.state);
@@ -292,6 +558,20 @@ export const FlowEditor = ({
     setError(null);
   };
 
+  const hydrateFlowCanvas = (flow: FlowItem): void => {
+    const flowBlocks = Array.isArray(flow.blocks) && flow.blocks.length > 0 ? flow.blocks : createInitialBlocks();
+    const normalizedGraph = normalizeGraphForBlocks(
+      flowBlocks,
+      flow.graph?.nodes ?? deriveGraphFromBlocks(flowBlocks).nodes,
+      flow.graph?.edges ?? deriveGraphFromBlocks(flowBlocks).edges,
+    );
+
+    setBlocks(flowBlocks);
+    setGraphNodes(normalizedGraph.nodes);
+    setGraphEdges(normalizedGraph.edges);
+    setPendingLinkSourceId(null);
+  };
+
   const loadFlowIntoEditor = async (flowId: string): Promise<void> => {
     setIsLoadingFlow(true);
     setError(null);
@@ -304,7 +584,7 @@ export const FlowEditor = ({
       setDescription(flow.description ?? '');
       setTagsInput((flow.tags ?? []).join(', '));
       setStatus(flow.status);
-      setBlocks(Array.isArray(flow.blocks) && flow.blocks.length > 0 ? flow.blocks : defaultBlocks);
+      hydrateFlowCanvas(flow);
       setTitlePrefix(flow.proposalDefaults.titlePrefix);
       setProposalVoteScope(flow.proposalDefaults.voteScope);
       setProposalState(flow.proposalDefaults.state);
@@ -400,6 +680,7 @@ export const FlowEditor = ({
     description: string;
     tags: string[];
     blocks: FlowBlockInput[];
+    graph: FlowGraph;
     proposalDefaults: FlowProposalDefaults;
   } => {
     if (!Array.isArray(blocks) || blocks.length === 0) {
@@ -412,7 +693,9 @@ export const FlowEditor = ({
       throw new Error('Flow name must be at least 2 characters');
     }
 
-    const normalizedBlocks = normalizeBlocksForApi(blocks);
+    const normalizedGraph = normalizeGraphForBlocks(blocks, graphNodes, graphEdges);
+    const orderedBlocks = topologicalSortBlocks(blocks, normalizedGraph.edges);
+    const normalizedBlocks = normalizeBlocksForApi(orderedBlocks);
 
     normalizedBlocks.forEach((block, index) => {
       if (!getString(block.id)) {
@@ -433,6 +716,7 @@ export const FlowEditor = ({
       description: description.trim(),
       tags: toTags(tagsInput),
       blocks: normalizedBlocks,
+      graph: normalizedGraph,
       proposalDefaults: {
         titlePrefix: titlePrefix.trim(),
         voteScope: proposalVoteScope,
@@ -480,6 +764,7 @@ export const FlowEditor = ({
       onFlowSaved(savedFlow);
       setActiveFlowId(savedFlow.id);
       setStatus(savedFlow.status);
+      hydrateFlowCanvas(savedFlow);
       setSuccess(activeFlowId === newFlowKey ? 'Flow created successfully.' : 'Flow updated successfully.');
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Unable to save flow');
@@ -494,16 +779,10 @@ export const FlowEditor = ({
     setSuccess(null);
 
     try {
+      const payload = buildFlowPayload();
       const contextRaw = compileContextJson.trim();
       const context = contextRaw ? parseJson<Record<string, unknown>>(contextRaw, 'Compile context') : {};
-      let result: FlowCompilationResult;
-
-      if (activeFlowId === newFlowKey) {
-        const payload = buildFlowPayload();
-        result = await compileInlineFlow(payload.blocks, context, accessToken);
-      } else {
-        result = await compileFlowById(activeFlowId, context, accessToken);
-      }
+      const result = await compileInlineFlow(payload.blocks, context, accessToken);
 
       setCompileResult(result);
       setSuccess('Compilation completed.');
@@ -525,6 +804,19 @@ export const FlowEditor = ({
     setSuccess(null);
 
     try {
+      const payload = buildFlowPayload();
+      const syncedFlow = await updateFlow(
+        activeFlowId,
+        {
+          ...payload,
+          status,
+        },
+        accessToken,
+      );
+
+      onFlowSaved(syncedFlow);
+      hydrateFlowCanvas(syncedFlow);
+
       const contextRaw = compileContextJson.trim();
       const context = contextRaw ? parseJson<Record<string, unknown>>(contextRaw, 'Compile context') : {};
 
@@ -567,6 +859,7 @@ export const FlowEditor = ({
       onFlowPublished(result);
       onFlowSaved(result.flow);
       setStatus(result.flow.status);
+      hydrateFlowCanvas(result.flow);
       setCompileResult(result.compilation);
       setSuccess('Flow published and proposal created successfully.');
     } catch (publishError) {
@@ -577,11 +870,52 @@ export const FlowEditor = ({
   };
 
   const addBlock = (type: SupportedBlockType): void => {
-    setBlocks((current) => [...current, defaultBlockForType(type)]);
+    const nextBlock = defaultBlockForType(type);
+    const nextBlockId = getString(nextBlock.id);
+    const previousBlockId = getString(blocks[blocks.length - 1]?.id);
+
+    setBlocks((current) => [...current, nextBlock]);
+    setGraphNodes((current) => {
+      const position = getDefaultNodePosition(current.length);
+      return [...current, { id: nextBlockId, x: position.x, y: position.y }];
+    });
+
+    if (previousBlockId && nextBlockId) {
+      setGraphEdges((current) => {
+        if (current.some((edge) => edge.source === previousBlockId && edge.target === nextBlockId)) {
+          return current;
+        }
+
+        return [...current, { id: makeEdgeId(previousBlockId, nextBlockId, current.length), source: previousBlockId, target: nextBlockId }];
+      });
+    }
   };
 
   const removeBlock = (blockId: string): void => {
     setBlocks((current) => current.filter((block) => getString(block.id) !== blockId));
+    setGraphNodes((current) => current.filter((node) => node.id !== blockId));
+    setGraphEdges((current) => current.filter((edge) => edge.source !== blockId && edge.target !== blockId));
+    setPendingLinkSourceId((current) => (current === blockId ? null : current));
+  };
+
+  const connectNodes = (sourceId: string, targetId: string): void => {
+    if (!sourceId || !targetId || sourceId === targetId) {
+      return;
+    }
+
+    setGraphEdges((current) => {
+      if (current.some((edge) => edge.source === sourceId && edge.target === targetId)) {
+        return current;
+      }
+
+      return [...current, { id: makeEdgeId(sourceId, targetId, current.length), source: sourceId, target: targetId }];
+    });
+
+    setPendingLinkSourceId(null);
+  };
+
+  const removeEdge = (edgeId: string): void => {
+    setGraphEdges((current) => current.filter((edge) => edge.id !== edgeId));
   };
 
   const changeBlockType = (blockId: string, nextType: SupportedBlockType): void => {
@@ -616,13 +950,20 @@ export const FlowEditor = ({
     );
   };
 
-  const onBlockDrop = (targetBlockId: string): void => {
-    if (!draggingBlockId || draggingBlockId === targetBlockId) {
+  const startNodeDrag = (event: ReactMouseEvent<HTMLButtonElement>, nodeId: string): void => {
+    event.preventDefault();
+    const board = canvasRef.current;
+    const node = graphNodeMap.get(nodeId);
+
+    if (!board || !node) {
       return;
     }
 
-    setBlocks((current) => reorderBlocks(current, draggingBlockId, targetBlockId));
-    setDraggingBlockId(null);
+    const rect = board.getBoundingClientRect();
+    const offsetX = event.clientX - rect.left - node.x;
+    const offsetY = event.clientY - rect.top - node.y;
+
+    setDraggingNode({ nodeId, offsetX, offsetY });
   };
 
   const renderNodeFields = (block: FlowBlockInput): JSX.Element => {
@@ -787,7 +1128,7 @@ export const FlowEditor = ({
       <article className="editor-card">
         <header className="editor-header">
           <h2>Flow Studio</h2>
-          <p>Build workflow logic using drag-and-drop blocks, then compile and publish.</p>
+          <p>Drag nodes in the canvas, connect execution order, then compile and publish.</p>
         </header>
 
         <div className="form-grid two-col">
@@ -853,7 +1194,7 @@ export const FlowEditor = ({
           />
         </label>
 
-        <h3 className="subheading">Blocks Canvas</h3>
+        <h3 className="subheading">Block Palette</h3>
         <div className="flow-palette">
           {supportedBlockTypes.map((typeItem) => (
             <button
@@ -867,64 +1208,115 @@ export const FlowEditor = ({
           ))}
         </div>
 
-        <div className="flow-canvas">
-          {blocks.map((block, index) => {
+        <h3 className="subheading">Canvas</h3>
+        <p className="hint-text">Drag nodes by the handle. Click "Start link" on a source, then "Link here" on a target.</p>
+        {orderingPreview.error ? <p className="error-text">{orderingPreview.error}</p> : null}
+
+        <div className="flow-canvas-board" ref={canvasRef}>
+          <svg className="flow-canvas-svg" aria-hidden="true">
+            {edgePaths.map((edge) => (
+              <path key={edge.id} d={edge.path} />
+            ))}
+          </svg>
+
+          {blocks.map((block) => {
             const blockId = getString(block.id, makeBlockId());
             const blockType = getString(block.type, 'transfer-sol') as SupportedBlockType;
+            const node = graphNodeMap.get(blockId);
+            const orderIndex = orderingPreview.ids.findIndex((id) => id === blockId) + 1;
+
+            if (!node) {
+              return null;
+            }
 
             return (
-              <div key={blockId} className="flow-node-wrap">
-                <article
-                  className="flow-node-card"
-                  draggable
-                  onDragStart={() => setDraggingBlockId(blockId)}
-                  onDragEnd={() => setDraggingBlockId(null)}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={() => onBlockDrop(blockId)}
-                >
-                  <div className="flow-node-header">
-                    <div className="flow-node-title">
-                      <span className="status-chip status-chip--gray">#{index + 1}</span>
-                      <strong>{getString(block.label, 'Untitled block')}</strong>
-                    </div>
-                    <button type="button" className="secondary-button" onClick={() => removeBlock(blockId)}>
+              <article
+                key={blockId}
+                className="flow-canvas-node"
+                style={{ left: `${node.x}px`, top: `${node.y}px` }}
+              >
+                <div className="flow-node-header">
+                  <div className="flow-node-title">
+                    <span className="status-chip status-chip--gray">#{orderIndex > 0 ? orderIndex : '-'}</span>
+                    <strong>{getString(block.label, 'Untitled block')}</strong>
+                  </div>
+
+                  <div className="flow-node-actions">
+                    <button type="button" className="secondary-button flow-node-mini" onMouseDown={(event) => startNodeDrag(event, blockId)}>
+                      Drag
+                    </button>
+                    <button type="button" className="secondary-button flow-node-mini" onClick={() => removeBlock(blockId)}>
                       Remove
                     </button>
                   </div>
+                </div>
 
-                  <div className="form-grid two-col">
-                    <label className="input-label">
-                      Label
-                      <input
-                        className="text-input"
-                        value={getString(block.label)}
-                        onChange={(event) => setBlockField(blockId, 'label', event.target.value)}
-                      />
-                    </label>
-                    <label className="input-label">
-                      Type
-                      <select
-                        className="select-input"
-                        value={blockType}
-                        onChange={(event) => changeBlockType(blockId, event.target.value as SupportedBlockType)}
-                      >
-                        {supportedBlockTypes.map((typeItem) => (
-                          <option key={typeItem.value} value={typeItem.value}>
-                            {typeItem.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
+                <div className="flow-link-row">
+                  <button
+                    type="button"
+                    className={`secondary-button flow-node-mini ${pendingLinkSourceId === blockId ? 'flow-link-active' : ''}`}
+                    onClick={() => setPendingLinkSourceId((current) => (current === blockId ? null : blockId))}
+                  >
+                    {pendingLinkSourceId === blockId ? 'Linking…' : 'Start link'}
+                  </button>
 
-                  {renderNodeFields(block)}
-                </article>
+                  {pendingLinkSourceId && pendingLinkSourceId !== blockId ? (
+                    <button
+                      type="button"
+                      className="secondary-button flow-node-mini"
+                      onClick={() => connectNodes(pendingLinkSourceId, blockId)}
+                    >
+                      Link here
+                    </button>
+                  ) : null}
+                </div>
 
-                {index < blocks.length - 1 ? <div className="flow-connector" aria-hidden="true">↓</div> : null}
-              </div>
+                <div className="form-grid two-col">
+                  <label className="input-label">
+                    Label
+                    <input
+                      className="text-input"
+                      value={getString(block.label)}
+                      onChange={(event) => setBlockField(blockId, 'label', event.target.value)}
+                    />
+                  </label>
+                  <label className="input-label">
+                    Type
+                    <select
+                      className="select-input"
+                      value={blockType}
+                      onChange={(event) => changeBlockType(blockId, event.target.value as SupportedBlockType)}
+                    >
+                      {supportedBlockTypes.map((typeItem) => (
+                        <option key={typeItem.value} value={typeItem.value}>
+                          {typeItem.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                {renderNodeFields(block)}
+              </article>
             );
           })}
         </div>
+
+        {graphEdges.length > 0 ? (
+          <div className="flow-edge-list">
+            <p className="hint-text">Links</p>
+            {graphEdges.map((edge) => (
+              <div key={edge.id} className="flow-edge-item">
+                <span>
+                  {edge.source.slice(0, 6)}... → {edge.target.slice(0, 6)}...
+                </span>
+                <button type="button" className="secondary-button flow-node-mini" onClick={() => removeEdge(edge.id)}>
+                  Remove link
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
 
         <h3 className="subheading">Proposal Defaults</h3>
         <div className="form-grid four-col">

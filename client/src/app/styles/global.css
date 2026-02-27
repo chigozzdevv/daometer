@@ -1309,35 +1309,43 @@ p {
   gap: 0.5rem;
 }
 
-.flow-canvas {
+.flow-canvas-board {
   border: var(--border);
   background: var(--bg);
-  padding: 0.7rem;
-  display: grid;
-  gap: 0.6rem;
+  position: relative;
+  min-height: 720px;
+  overflow: auto;
 }
 
-.flow-node-wrap {
-  display: grid;
-  gap: 0.35rem;
+.flow-canvas-svg {
+  position: absolute;
+  inset: 0;
+  width: 1800px;
+  height: 1200px;
+  pointer-events: none;
 }
 
-.flow-node-card {
+.flow-canvas-svg path {
+  fill: none;
+  stroke: #666;
+  stroke-width: 2.5px;
+  stroke-dasharray: 5 4;
+}
+
+.flow-canvas-node {
+  width: 360px;
+  position: absolute;
   border: var(--border);
   background: var(--white);
   padding: 0.65rem;
   display: grid;
   gap: 0.55rem;
-  cursor: grab;
-}
-
-.flow-node-card:active {
-  cursor: grabbing;
+  box-shadow: var(--shadow);
 }
 
 .flow-node-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.6rem;
 }
@@ -1348,10 +1356,45 @@ p {
   gap: 0.45rem;
 }
 
-.flow-connector {
-  text-align: center;
-  font-size: 0.95rem;
-  color: #666;
+.flow-node-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.flow-node-mini {
+  padding: 0.35rem 0.5rem;
+  font-size: 0.72rem;
+  box-shadow: none;
+}
+
+.flow-link-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.flow-link-active {
+  background: var(--yellow);
+}
+
+.flow-edge-list {
+  border: var(--border);
+  background: var(--bg);
+  padding: 0.65rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.flow-edge-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  font-size: 0.8rem;
+  border: 1px solid #ccc;
+  padding: 0.35rem 0.45rem;
+  background: var(--white);
 }
 
 .subheading {

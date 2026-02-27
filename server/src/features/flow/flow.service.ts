@@ -1,7 +1,7 @@
 import { Types } from 'mongoose';
 import { compileFlowBlocks } from '@/features/flow/flow.compiler';
 import { FlowModel, type FlowDocument } from '@/features/flow/flow.model';
-import type { FlowBlock, FlowCompileContext, FlowProposalDefaults } from '@/features/flow/flow.types';
+import type { FlowBlock, FlowCompileContext, FlowGraph, FlowProposalDefaults } from '@/features/flow/flow.types';
 import { createProposal, createProposalOnchain, type CreateProposalInput } from '@/features/proposal/proposal.service';
 import { AppError } from '@/shared/errors/app-error';
 import { assertCanManageDao } from '@/shared/utils/authorization.util';
@@ -14,6 +14,7 @@ type CreateFlowInput = {
   description?: string;
   tags?: string[];
   blocks: FlowBlock[];
+  graph?: FlowGraph;
   proposalDefaults?: Partial<FlowProposalDefaults>;
 };
 
@@ -22,6 +23,7 @@ type UpdateFlowInput = {
   description?: string;
   tags?: string[];
   blocks?: FlowBlock[];
+  graph?: FlowGraph;
   proposalDefaults?: Partial<FlowProposalDefaults>;
   status?: 'draft' | 'published' | 'archived';
 };
@@ -115,6 +117,7 @@ export const createFlow = async (input: CreateFlowInput, userId: Types.ObjectId)
     description: input.description ?? '',
     tags: input.tags ?? [],
     blocks: input.blocks,
+    graph: input.graph ?? null,
     proposalDefaults,
     latestCompilation: buildCompilationSnapshot(compilation),
     createdBy: userId,
@@ -222,6 +225,10 @@ export const updateFlow = async (flowId: string, input: UpdateFlowInput, userId:
   if (input.blocks) {
     flow.blocks = input.blocks;
     flow.latestCompilation = null;
+  }
+
+  if (input.graph) {
+    flow.graph = input.graph;
   }
 
   if (input.proposalDefaults) {

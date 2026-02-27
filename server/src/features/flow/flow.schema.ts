@@ -101,6 +101,23 @@ const proposalDefaultsSchema = z.object({
   maxRiskScore: z.number().int().min(0).max(100).default(70),
 });
 
+const flowGraphNodeSchema = z.object({
+  id: z.string().trim().min(2).max(80),
+  x: z.number().min(0),
+  y: z.number().min(0),
+});
+
+const flowGraphEdgeSchema = z.object({
+  id: z.string().trim().min(2).max(120),
+  source: z.string().trim().min(2).max(80),
+  target: z.string().trim().min(2).max(80),
+});
+
+const flowGraphSchema = z.object({
+  nodes: z.array(flowGraphNodeSchema).max(60),
+  edges: z.array(flowGraphEdgeSchema).max(120),
+});
+
 const compileContextSchema = z.object({
   nativeTreasuryLamports: z.number().int().nonnegative().optional(),
   tokenTreasuryBalances: z
@@ -179,6 +196,7 @@ export const createFlowSchema = z.object({
     description: z.string().trim().max(2000).optional(),
     tags: z.array(z.string().trim().min(2).max(40)).max(10).optional(),
     blocks: z.array(flowBlockSchema).min(1).max(30),
+    graph: flowGraphSchema.optional(),
     proposalDefaults: proposalDefaultsSchema.optional(),
   }),
   params: emptyObject,
@@ -192,6 +210,7 @@ export const updateFlowSchema = z.object({
       description: z.string().trim().max(2000).optional(),
       tags: z.array(z.string().trim().min(2).max(40)).max(10).optional(),
       blocks: z.array(flowBlockSchema).min(1).max(30).optional(),
+      graph: flowGraphSchema.optional(),
       proposalDefaults: proposalDefaultsSchema.partial().optional(),
       status: z.enum(['draft', 'published', 'archived']).optional(),
     })

@@ -1,5 +1,5 @@
 import { type HydratedDocument, model, Schema, Types } from 'mongoose';
-import type { FlowProposalDefaults } from '@/features/flow/flow.types';
+import type { FlowGraph, FlowProposalDefaults } from '@/features/flow/flow.types';
 
 export interface FlowCompilationSnapshot {
   compiledAt: Date;
@@ -18,6 +18,7 @@ export interface Flow {
   status: 'draft' | 'published' | 'archived';
   version: number;
   blocks: unknown[];
+  graph: FlowGraph | null;
   proposalDefaults: FlowProposalDefaults;
   latestCompilation: FlowCompilationSnapshot | null;
   lastPublishedProposalId: Types.ObjectId | null;
@@ -108,6 +109,76 @@ const flowCompilationSnapshotSchema = new Schema<FlowCompilationSnapshot>(
   },
 );
 
+const flowGraphNodeSchema = new Schema<FlowGraph['nodes'][number]>(
+  {
+    id: {
+      type: String,
+      required: true,
+      trim: true,
+      minlength: 2,
+      maxlength: 80,
+    },
+    x: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    y: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+const flowGraphEdgeSchema = new Schema<FlowGraph['edges'][number]>(
+  {
+    id: {
+      type: String,
+      required: true,
+      trim: true,
+      minlength: 2,
+      maxlength: 120,
+    },
+    source: {
+      type: String,
+      required: true,
+      trim: true,
+      minlength: 2,
+      maxlength: 80,
+    },
+    target: {
+      type: String,
+      required: true,
+      trim: true,
+      minlength: 2,
+      maxlength: 80,
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+const flowGraphSchema = new Schema<FlowGraph>(
+  {
+    nodes: {
+      type: [flowGraphNodeSchema],
+      default: [],
+    },
+    edges: {
+      type: [flowGraphEdgeSchema],
+      default: [],
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
 const flowSchema = new Schema<Flow>(
   {
     daoId: {
@@ -159,6 +230,10 @@ const flowSchema = new Schema<Flow>(
         validator: (value: unknown) => Array.isArray(value) && value.length > 0,
         message: 'Flow must have at least one block',
       },
+    },
+    graph: {
+      type: flowGraphSchema,
+      default: null,
     },
     proposalDefaults: {
       type: flowProposalDefaultsSchema,

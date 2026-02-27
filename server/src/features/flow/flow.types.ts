@@ -1,6 +1,23 @@
 export type FlowVoteScope = 'community' | 'council';
 export type ProposalStateInput = 'draft' | 'voting';
 
+export interface FlowGraphNode {
+  id: string;
+  x: number;
+  y: number;
+}
+
+export interface FlowGraphEdge {
+  id: string;
+  source: string;
+  target: string;
+}
+
+export interface FlowGraph {
+  nodes: FlowGraphNode[];
+  edges: FlowGraphEdge[];
+}
+
 export interface FlowBlockBase {
   id: string;
   label: string;

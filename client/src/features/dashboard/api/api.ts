@@ -105,6 +105,7 @@ export type FlowItem = {
   tags?: string[];
   version: number;
   blocks: FlowBlockInput[];
+  graph: FlowGraph | null;
   proposalDefaults: FlowProposalDefaults;
   latestCompilation: {
     compiledAt: string;
@@ -251,6 +252,23 @@ export type AuthProfile = {
 
 export type FlowBlockInput = Record<string, unknown>;
 
+export type FlowGraphNode = {
+  id: string;
+  x: number;
+  y: number;
+};
+
+export type FlowGraphEdge = {
+  id: string;
+  source: string;
+  target: string;
+};
+
+export type FlowGraph = {
+  nodes: FlowGraphNode[];
+  edges: FlowGraphEdge[];
+};
+
 export type FlowProposalDefaults = {
   titlePrefix: string;
   voteScope: 'community' | 'council';
@@ -300,6 +318,7 @@ export type CreateFlowInput = {
   description?: string;
   tags?: string[];
   blocks: FlowBlockInput[];
+  graph?: FlowGraph;
   proposalDefaults?: Partial<FlowProposalDefaults>;
 };
 
@@ -308,6 +327,7 @@ export type UpdateFlowInput = {
   description?: string;
   tags?: string[];
   blocks?: FlowBlockInput[];
+  graph?: FlowGraph;
   proposalDefaults?: Partial<FlowProposalDefaults>;
   status?: 'draft' | 'published' | 'archived';
 };
