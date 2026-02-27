@@ -13,10 +13,17 @@ import {
 } from '@/features/dashboard/api/api';
 import { formatDateTime } from '@/features/dashboard/lib/format';
 
-const canvasNodeWidth = 360;
 const canvasNodeHeight = 210;
 const PLACEHOLDER_PUBKEY = '11111111111111111111111111111111';
 const PLACEHOLDER_BASE64 = 'AQ==';
+
+type NodeSizeOption = 'compact' | 'normal' | 'wide';
+
+const nodeWidthBySize: Record<NodeSizeOption, number> = {
+  compact: 300,
+  normal: 360,
+  wide: 420,
+};
 
 type SupportedBlockType =
   | 'transfer-sol'
@@ -319,6 +326,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
   const [blocks, setBlocks] = useState<FlowBlockInput[]>([]);
   const [graphNodes, setGraphNodes] = useState<FlowGraphNode[]>([]);
   const [graphEdges, setGraphEdges] = useState<FlowGraphEdge[]>([]);
+  const [nodeSize, setNodeSize] = useState<NodeSizeOption>('normal');
   const [pendingLinkSourceId, setPendingLinkSourceId] = useState<string | null>(null);
   const [draggingNode, setDraggingNode] = useState<{
     nodeId: string;
@@ -329,6 +337,8 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
   const [compileContextJson, setCompileContextJson] = useState('{}');
   const [compileResult, setCompileResult] = useState<FlowCompilationResult | null>(null);
   const [lastPublishResult, setLastPublishResult] = useState<PublishFlowResult | null>(null);
+
+  const nodeWidth = nodeWidthBySize[nodeSize];
 
   const graphNodeMap = useMemo(() => new Map(graphNodes.map((node) => [node.id, node])), [graphNodes]);
 
@@ -357,7 +367,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
             return null;
           }
 
-          const startX = sourceNode.x + canvasNodeWidth - 8;
+          const startX = sourceNode.x + nodeWidth - 8;
           const startY = sourceNode.y + 58;
           const endX = targetNode.x + 8;
           const endY = targetNode.y + 58;
@@ -371,7 +381,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
           };
         })
         .filter((item): item is { id: string; path: string } => Boolean(item)),
-    [graphEdges, graphNodeMap],
+    [graphEdges, graphNodeMap, nodeWidth],
   );
 
   const markDirty = (): void => {
@@ -434,7 +444,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
       }
 
       const rect = board.getBoundingClientRect();
-      const maxX = Math.max(8, rect.width - canvasNodeWidth - 8);
+      const maxX = Math.max(8, rect.width - nodeWidth - 8);
       const maxY = Math.max(8, rect.height - canvasNodeHeight - 8);
       const nextX = clamp(event.clientX - rect.left - draggingNode.offsetX, 8, maxX);
       const nextY = clamp(event.clientY - rect.top - draggingNode.offsetY, 8, maxY);
@@ -465,7 +475,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
       window.removeEventListener('mouseup', handleUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draggingNode]);
+  }, [draggingNode, nodeWidth]);
 
   const normalizeBlocksForApi = (items: FlowBlockInput[]): FlowBlockInput[] =>
     items.map((block) => {
@@ -925,6 +935,14 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
         <div className="flow-builder-status-row">
           <span className="hint-text">{isAutoSaving ? 'Auto-saving...' : isDirty ? 'Unsaved changes' : 'Saved'}</span>
           <span className="hint-text">{lastSavedAt ? `Last saved: ${formatDateTime(lastSavedAt)}` : 'Not saved yet'}</span>
+          <label className="input-label flow-node-size-field">
+            Block size
+            <select className="select-input" value={nodeSize} onChange={(event) => setNodeSize(event.target.value as NodeSizeOption)}>
+              <option value="compact">Compact</option>
+              <option value="normal">Normal</option>
+              <option value="wide">Wide</option>
+            </select>
+          </label>
         </div>
 
         <div className="flow-palette">
@@ -941,6 +959,9 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
         </div>
 
         {orderingPreview.error ? <p className="error-text">{orderingPreview.error}</p> : null}
+        <p className="hint-text">
+          Connect only real execution dependencies. Example: account setup to transfer, config update to upgrade, stream setup to stream action.
+        </p>
 
         <div className="flow-canvas-board" ref={canvasRef}>
           <svg className="flow-canvas-svg" aria-hidden="true">
@@ -963,7 +984,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
               <article
                 key={blockId}
                 className="flow-canvas-node"
-                style={{ left: `${node.x}px`, top: `${node.y}px` }}
+                style={{ left: `${node.x}px`, top: `${node.y}px`, width: `${nodeWidth}px` }}
               >
                 <div className="flow-node-header">
                   <div className="flow-node-title">

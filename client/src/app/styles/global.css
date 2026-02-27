@@ -1333,6 +1333,10 @@ p {
   flex-wrap: wrap;
 }
 
+.flow-node-size-field {
+  width: min(180px, 100%);
+}
+
 .editor-header h2 {
   font-size: 1.05rem;
   font-weight: 800;

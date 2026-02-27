@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type PropsWithChildren } from 'react';
 import { clearStoredSession, getStoredSession, setStoredSession, type StoredSession } from '@/shared/lib/session-storage';
-import { setAuthExpiredHandler } from '@/shared/lib/api-client';
+import { setAuthExpiredHandler, setAuthSessionUpdateHandler } from '@/shared/lib/api-client';
 
 type AuthContextValue = {
   session: StoredSession | null;
@@ -24,10 +24,17 @@ export const AuthProvider = ({ children }: PropsWithChildren): JSX.Element => {
       }
     };
 
+    const handleSessionUpdate = (nextSession: StoredSession): void => {
+      setStoredSession(nextSession);
+      setSession(nextSession);
+    };
+
     setAuthExpiredHandler(handleAuthExpired);
+    setAuthSessionUpdateHandler(handleSessionUpdate);
 
     return () => {
       setAuthExpiredHandler(null);
+      setAuthSessionUpdateHandler(null);
     };
   }, []);
 
