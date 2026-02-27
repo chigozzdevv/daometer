@@ -80,6 +80,23 @@ const toFieldErrors = (error: unknown): Record<string, string> => {
   return parsed;
 };
 
+const toReadableGovernancePrepareError = (error: unknown): string => {
+  if (!(error instanceof ApiRequestError)) {
+    return error instanceof Error ? error.message : 'Governance creation step failed';
+  }
+
+  const routeMissing =
+    error.status === 404 &&
+    typeof error.message === 'string' &&
+    error.message.includes('/prepare-governance');
+
+  if (routeMissing) {
+    return 'Backend route /daos/:daoId/prepare-governance is missing on the running API. Restart/update backend and verify VITE_API_BASE_URL points to the latest server.';
+  }
+
+  return error.message || 'Governance creation step failed';
+};
+
 const withInputErrorClass = (baseClass: string, hasError: boolean): string =>
   `${baseClass}${hasError ? ' input-invalid' : ''}`;
 
@@ -591,9 +608,7 @@ export const DashboardDaosPage = (): JSX.Element => {
         setOnchainSuccess(
           `Realm + DAO created, but governance creation failed. You can create governance from the DAO card.`,
         );
-        setOnchainError(
-          governanceError instanceof Error ? governanceError.message : 'Governance creation step failed',
-        );
+        setOnchainError(toReadableGovernancePrepareError(governanceError));
         setDaos((prev) => [createdDao, ...prev.filter((item) => item.id !== createdDao.id)]);
         return;
       }
