@@ -537,6 +537,21 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
   }, [flowDaoId]);
 
   useEffect(() => {
+    if (!daoContext) {
+      return;
+    }
+
+    setBlocks((current) => current.map((block) => applyDaoDefaultsToBlock(block)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    daoContext?.id,
+    daoContext?.communityMint,
+    selectedGovernance?.address,
+    selectedGovernance?.nativeTreasuryAddress,
+    publishGoverningTokenMint,
+  ]);
+
+  useEffect(() => {
     if (!draggingNode) {
       return;
     }

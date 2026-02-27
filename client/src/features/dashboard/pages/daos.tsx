@@ -390,6 +390,10 @@ export const DashboardDaosPage = (): JSX.Element => {
   const [onchainCommunityMint, setOnchainCommunityMint] = useState('');
   const [onchainCouncilMint, setOnchainCouncilMint] = useState('');
   const [onchainFieldErrors, setOnchainFieldErrors] = useState<FieldErrors<OnchainFieldErrorKey>>({});
+  const [onchainCreateGovernanceNow, setOnchainCreateGovernanceNow] = useState(true);
+  const [onchainGovernanceConfig, setOnchainGovernanceConfig] = useState<GovernanceConfigDraft>(
+    governancePresetConfig('balanced', 'community'),
+  );
   const [mintTokenName, setMintTokenName] = useState('');
   const [mintDecimals, setMintDecimals] = useState('6');
   const [mintAuthorityWallet, setMintAuthorityWallet] = useState('');
@@ -642,6 +646,15 @@ export const DashboardDaosPage = (): JSX.Element => {
     });
   }, [daos]);
 
+  useEffect(() => {
+    if (!onchainCouncilMint.trim() && onchainGovernanceConfig.voteScope === 'council') {
+      setOnchainGovernanceConfig((current) => ({
+        ...current,
+        voteScope: 'community',
+      }));
+    }
+  }, [onchainCouncilMint, onchainGovernanceConfig.voteScope]);
+
   const handleImportDao = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     setImportError(null);
@@ -812,19 +825,89 @@ export const DashboardDaosPage = (): JSX.Element => {
         prepared.transactionBase58,
         prepared.transactionBase64,
       );
+      const createdDao = await createDao(
+        {
+          name: onchainName.trim(),
+          description: onchainDescription.trim() || undefined,
+          network: prepared.network,
+          realmAddress: prepared.realmAddress,
+          governanceProgramId: prepared.governanceProgramId,
+          authorityWallet: prepared.authorityWallet,
+          communityMint: onchainCommunityMint.trim() || undefined,
+          councilMint: onchainCouncilMint.trim() || undefined,
+        },
+        session.accessToken,
+      );
 
-      setImportName(onchainName.trim());
-      setImportDescription(onchainDescription.trim());
-      setImportNetwork(prepared.network);
-      setImportRealmAddress(prepared.realmAddress);
-      setImportGovernanceProgramId(prepared.governanceProgramId);
-      setImportAuthorityWallet(prepared.authorityWallet);
-      setImportCommunityMint(onchainCommunityMint.trim());
-      setImportCouncilMint(onchainCouncilMint.trim());
+      let finalDao = createdDao;
+      let governanceResultSummary = '';
+
+      if (onchainCreateGovernanceNow) {
+        try {
+          const governanceScope =
+            onchainGovernanceConfig.voteScope === 'council' && !onchainCouncilMint.trim()
+              ? 'community'
+              : onchainGovernanceConfig.voteScope;
+          const governancePrepared = await prepareDaoGovernanceCreate(
+            createdDao.id,
+            {
+              voteScope: governanceScope,
+              createAuthorityWallet: connectedWallet,
+              governanceConfig: {
+                communityYesVoteThresholdPercent: onchainGovernanceConfig.communityYesVoteThresholdPercent,
+                councilYesVoteThresholdPercent: onchainGovernanceConfig.councilYesVoteThresholdPercent,
+                councilVetoVoteThresholdPercent: onchainGovernanceConfig.councilVetoVoteThresholdPercent,
+                baseVotingTimeHours: onchainGovernanceConfig.baseVotingTimeHours,
+                instructionHoldUpTimeHours: onchainGovernanceConfig.instructionHoldUpTimeHours,
+                voteTipping: onchainGovernanceConfig.voteTipping,
+                councilVoteTipping: onchainGovernanceConfig.councilVoteTipping,
+              },
+              programVersion: 3,
+            },
+            session.accessToken,
+          );
+
+          if (connectedWallet !== governancePrepared.authorityWallet) {
+            throw new Error('Connected wallet must match DAO authority wallet for governance creation.');
+          }
+
+          const governanceSignature = await sendPreparedTransaction(
+            provider,
+            governancePrepared.transactionMessage,
+            governancePrepared.transactionBase58,
+            governancePrepared.transactionBase64,
+          );
+
+          finalDao = await updateDao(
+            createdDao.id,
+            {
+              defaultGovernanceAddress: governancePrepared.governanceAddress,
+            },
+            session.accessToken,
+          );
+
+          governanceResultSummary = ` Governance created (${governancePrepared.governanceAddress.slice(0, 8)}...) tx ${governanceSignature.slice(0, 12)}...`;
+        } catch (governanceError) {
+          setOnchainSuccess(
+            `Realm + DAO created, but governance creation failed. You can create governance from the DAO card.`,
+          );
+          setOnchainError(
+            governanceError instanceof Error ? governanceError.message : 'Governance creation step failed',
+          );
+          setDaos((prev) => [createdDao, ...prev.filter((item) => item.id !== createdDao.id)]);
+          return;
+        }
+      }
+
+      setDaos((prev) => [finalDao, ...prev.filter((item) => item.id !== finalDao.id)]);
       setOnchainFieldErrors({});
-      setImportSuccess('On-chain Realm created. Review prefilled fields below and click "Import Existing Realm".');
-      setOnchainSuccess(`On-chain Realm created (${prepared.realmAddress.slice(0, 8)}...). Tx: ${signature.slice(0, 12)}...`);
-      setActiveTab('import');
+      setOnchainName('');
+      setOnchainDescription('');
+      setOnchainCommunityMint('');
+      setOnchainCouncilMint('');
+      setOnchainSuccess(
+        `On-chain Realm created (${prepared.realmAddress.slice(0, 8)}...) tx ${signature.slice(0, 12)}...${governanceResultSummary}`,
+      );
     } catch (createDaoError) {
       const fieldErrors = toFieldErrors(createDaoError);
       const validationFieldErrors: FieldErrors<OnchainFieldErrorKey> = {};
@@ -968,7 +1051,10 @@ export const DashboardDaosPage = (): JSX.Element => {
   };
 
   return (
-    <DashboardShell title="DAOs" description="Create on-chain Realms, then import existing Realm addresses into Daometer.">
+    <DashboardShell
+      title="DAOs"
+      description="Create a DAO end-to-end: Realm, DAO record, governance account, and native treasury."
+    >
       <article className="data-card">
         <div className="data-card-header">
           <h3>DAO Setup</h3>
@@ -1121,6 +1207,144 @@ export const DashboardDaosPage = (): JSX.Element => {
               <textarea className="text-input" value={onchainDescription} onChange={(event) => setOnchainDescription(event.target.value)} />
             </label>
 
+            <label className="checkbox-field">
+              <input
+                type="checkbox"
+                checked={onchainCreateGovernanceNow}
+                onChange={(event) => setOnchainCreateGovernanceNow(event.target.checked)}
+              />
+              Create governance account + native treasury after realm creation
+            </label>
+
+            {onchainCreateGovernanceNow ? (
+              <div className="dao-governance-config-form">
+                <label className="input-label">
+                  Preset
+                  <select
+                    className="select-input"
+                    value={onchainGovernanceConfig.preset}
+                    onChange={(event) => {
+                      const nextPreset = event.target.value as GovernanceConfigPreset;
+                      setOnchainGovernanceConfig((current) => {
+                        if (nextPreset === 'custom') {
+                          return { ...current, preset: 'custom' };
+                        }
+
+                        return governancePresetConfig(nextPreset, current.voteScope);
+                      });
+                    }}
+                  >
+                    <option value="balanced">Balanced</option>
+                    <option value="fast">Fast</option>
+                    <option value="secure">Secure</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                </label>
+
+                <label className="input-label">
+                  Vote scope
+                  <select
+                    className="select-input"
+                    value={onchainGovernanceConfig.voteScope}
+                    onChange={(event) => {
+                      const nextScope = event.target.value as 'community' | 'council';
+                      setOnchainGovernanceConfig((current) => {
+                        if (current.preset === 'custom') {
+                          return { ...current, voteScope: nextScope };
+                        }
+
+                        return governancePresetConfig(current.preset, nextScope);
+                      });
+                    }}
+                  >
+                    <option value="community">community</option>
+                    <option value="council" disabled={!onchainCouncilMint.trim()}>
+                      council{!onchainCouncilMint.trim() ? ' (requires council mint)' : ''}
+                    </option>
+                  </select>
+                </label>
+
+                <label className="input-label">
+                  Community yes (%)
+                  <input
+                    className="text-input"
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={onchainGovernanceConfig.communityYesVoteThresholdPercent}
+                    onChange={(event) =>
+                      setOnchainGovernanceConfig((current) => ({
+                        ...current,
+                        preset: 'custom',
+                        communityYesVoteThresholdPercent: Math.max(
+                          1,
+                          Math.min(100, Number(event.target.value) || 1),
+                        ),
+                      }))
+                    }
+                  />
+                </label>
+
+                <label className="input-label">
+                  Voting time (hours)
+                  <input
+                    className="text-input"
+                    type="number"
+                    min={1}
+                    max={720}
+                    value={onchainGovernanceConfig.baseVotingTimeHours}
+                    onChange={(event) =>
+                      setOnchainGovernanceConfig((current) => ({
+                        ...current,
+                        preset: 'custom',
+                        baseVotingTimeHours: Math.max(1, Math.min(720, Number(event.target.value) || 1)),
+                      }))
+                    }
+                  />
+                </label>
+
+                <label className="input-label">
+                  Hold-up (hours)
+                  <input
+                    className="text-input"
+                    type="number"
+                    min={0}
+                    max={720}
+                    value={onchainGovernanceConfig.instructionHoldUpTimeHours}
+                    onChange={(event) =>
+                      setOnchainGovernanceConfig((current) => ({
+                        ...current,
+                        preset: 'custom',
+                        instructionHoldUpTimeHours: Math.max(
+                          0,
+                          Math.min(720, Number(event.target.value) || 0),
+                        ),
+                      }))
+                    }
+                  />
+                </label>
+
+                <label className="input-label">
+                  Vote tipping
+                  <select
+                    className="select-input"
+                    value={onchainGovernanceConfig.voteTipping}
+                    onChange={(event) =>
+                      setOnchainGovernanceConfig((current) => ({
+                        ...current,
+                        preset: 'custom',
+                        voteTipping: event.target.value as GovernanceVoteTipping,
+                      }))
+                    }
+                  >
+                    <option value="strict">strict</option>
+                    <option value="early">early</option>
+                    <option value="disabled">disabled</option>
+                  </select>
+                </label>
+              </div>
+            ) : null}
+
             {onchainError ? <p className="error-text">{onchainError}</p> : null}
             {onchainSuccess ? <p className="success-text">{onchainSuccess}</p> : null}
             <button
@@ -1131,7 +1355,7 @@ export const DashboardDaosPage = (): JSX.Element => {
                 void handleCreateOnchainDao();
               }}
             >
-              {isCreatingOnchain ? 'Creating On-chain...' : 'Create On-chain Realm'}
+              {isCreatingOnchain ? 'Creating DAO...' : 'Create DAO'}
             </button>
               </form>
             ) : (
