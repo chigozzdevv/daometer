@@ -6,6 +6,16 @@ import { EmptyState, ErrorState, LoadingState } from '@/features/dashboard/compo
 import { formatDateTime } from '@/features/dashboard/lib/format';
 import { ApiRequestError } from '@/shared/lib/api-client';
 
+const statusChip = (status: ExecutionJobItem['status']): JSX.Element => {
+  const map = {
+    running: 'status-chip--yellow',
+    completed: 'status-chip--green',
+    failed: 'status-chip--red',
+    pending: 'status-chip--gray',
+  };
+  return <span className={`status-chip ${map[status]}`}>{status}</span>;
+};
+
 export const DashboardExecutionPage = (): JSX.Element => {
   const { session } = useAuth();
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
@@ -31,25 +41,16 @@ export const DashboardExecutionPage = (): JSX.Element => {
         const adminAccess = profile.roles.includes('admin');
 
         if (!adminAccess) {
-          if (isMounted) {
-            setIsAdmin(false);
-            setJobs([]);
-          }
+          if (isMounted) { setIsAdmin(false); setJobs([]); }
           return;
         }
 
-        if (isMounted) {
-          setIsAdmin(true);
-        }
+        if (isMounted) setIsAdmin(true);
 
         const items = await getExecutionJobs(session.accessToken, { limit: 100 });
-        if (isMounted) {
-          setJobs(items);
-        }
+        if (isMounted) setJobs(items);
       } catch (loadError) {
-        if (!isMounted) {
-          return;
-        }
+        if (!isMounted) return;
 
         if (loadError instanceof ApiRequestError && loadError.status === 401) {
           setError('Session expired. Please sign in again.');
@@ -63,17 +64,12 @@ export const DashboardExecutionPage = (): JSX.Element => {
           setError(loadError instanceof Error ? loadError.message : 'Unable to load execution jobs');
         }
       } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
+        if (isMounted) setIsLoading(false);
       }
     };
 
     void load();
-
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, [session?.accessToken]);
 
   const activeCount = useMemo(
@@ -94,11 +90,11 @@ export const DashboardExecutionPage = (): JSX.Element => {
       {!isLoading && !error && isAdmin && jobs.length > 0 ? (
         <>
           <div className="metric-grid">
-            <article className="metric-card">
+            <article className={`metric-card${activeCount > 0 ? ' metric-card--warning' : ''}`}>
               <p>Active jobs</p>
               <h3>{activeCount}</h3>
             </article>
-            <article className="metric-card">
+            <article className={`metric-card${failedCount > 0 ? ' metric-card--danger' : ''}`}>
               <p>Failed jobs</p>
               <h3>{failedCount}</h3>
             </article>
@@ -123,14 +119,12 @@ export const DashboardExecutionPage = (): JSX.Element => {
               <tbody>
                 {jobs.map((job) => (
                   <tr key={job.id}>
-                    <td>{job.status}</td>
-                    <td>{job.daoId}</td>
-                    <td>{job.proposalId}</td>
-                    <td>
-                      {job.attemptCount}/{job.maxRetries}
-                    </td>
+                    <td>{statusChip(job.status)}</td>
+                    <td><code style={{ fontSize: '0.78rem' }}>{job.daoId.slice(0, 8)}…</code></td>
+                    <td><code style={{ fontSize: '0.78rem' }}>{job.proposalId.slice(0, 8)}…</code></td>
+                    <td>{job.attemptCount}/{job.maxRetries}</td>
                     <td>{formatDateTime(job.nextRunAt)}</td>
-                    <td>{job.lastError ?? 'None'}</td>
+                    <td style={{ color: job.lastError ? '#a93226' : '#aaa' }}>{job.lastError ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>

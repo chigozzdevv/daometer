@@ -117,10 +117,15 @@ export const DashboardOverviewPage = (): JSX.Element => {
           <MetricCard label="Managed DAOs" value={metrics.managedDaoCount.toString()} />
           <MetricCard label="Published flows" value={metrics.publishedFlowCount.toString()} />
           <MetricCard label="Draft flows" value={metrics.draftFlowCount.toString()} />
-          <MetricCard label="Proposals in voting" value={metrics.votingProposalCount.toString()} />
+          <MetricCard
+            label="Proposals in voting"
+            value={metrics.votingProposalCount.toString()}
+            tone={metrics.votingProposalCount > 0 ? 'warning' : 'default'}
+          />
           <MetricCard
             label="Enabled workflows"
             value={metrics.enabledWorkflowCount === null ? 'N/A' : metrics.enabledWorkflowCount.toString()}
+            tone={metrics.enabledWorkflowCount !== null && metrics.enabledWorkflowCount > 0 ? 'accent' : 'default'}
           />
         </div>
       ) : null}

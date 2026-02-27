@@ -805,6 +805,8 @@ p {
   color: var(--black);
   border: var(--border);
   background: var(--bg);
+  border-left: 3px solid var(--yellow);
+  padding-left: calc(0.65rem - 2px);
 }
 
 .dashboard-content-area {
@@ -817,6 +819,7 @@ p {
   border: var(--border);
   background: var(--white);
   padding: 0.95rem 1rem;
+  border-left: 4px solid var(--yellow);
 }
 
 .dashboard-topbar-kicker {
@@ -846,6 +849,11 @@ p {
   gap: 1rem;
 }
 
+.dashboard-page-header {
+  border-bottom: var(--border);
+  padding-bottom: 0.9rem;
+}
+
 .dashboard-page-header h1 {
   font-size: 1.6rem;
   font-weight: 800;
@@ -854,7 +862,8 @@ p {
 
 .dashboard-page-header p {
   margin-top: 0.3rem;
-  color: #555;
+  color: #666;
+  font-size: 0.9rem;
 }
 
 .metric-grid {
@@ -893,7 +902,34 @@ p {
 }
 
 .metric-card-accent {
-  background: var(--yellow);
+  background: rgba(245, 217, 10, 0.35);
+}
+
+.metric-card--warning {
+  background: rgba(245, 217, 10, 0.18);
+  border-left: 3px solid #b89a00;
+}
+
+.metric-card--danger {
+  background: rgba(220, 53, 69, 0.10);
+  border-left: 3px solid #a93226;
+}
+
+.data-card {
+  border: var(--border);
+  background: var(--white);
+  padding: 0.85rem;
+  display: grid;
+  gap: 0.7rem;
+  transition: box-shadow 0.12s;
+}
+
+.data-card:hover {
+  box-shadow: 4px 4px 0 var(--black);
+}
+
+.data-table tbody tr:hover td {
+  background: var(--bg);
 }
 
 .simple-list {
@@ -993,10 +1029,37 @@ p {
 .status-chip {
   border: var(--border);
   background: var(--bg);
-  font-size: 0.72rem;
-  font-weight: 700;
-  padding: 0.2rem 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.55rem;
   white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.status-chip--green {
+  background: rgba(125, 245, 165, 0.25);
+  border-color: #1aad5e;
+  color: #0e6639;
+}
+
+.status-chip--yellow {
+  background: rgba(245, 217, 10, 0.25);
+  border-color: #b89a00;
+  color: #7a6400;
+}
+
+.status-chip--red {
+  background: rgba(220, 53, 69, 0.12);
+  border-color: #a93226;
+  color: #a93226;
+}
+
+.status-chip--gray {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: #aaa;
+  color: #666;
 }
 
 .data-card dl {

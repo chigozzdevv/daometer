@@ -15,6 +15,14 @@ import { EmptyState, ErrorState, LoadingState } from '@/features/dashboard/compo
 import { formatDateTime } from '@/features/dashboard/lib/format';
 import { ApiRequestError } from '@/shared/lib/api-client';
 
+const resultChip = (results: WorkflowEventItem['actionResults']): JSX.Element => {
+  if (results.some((r) => r.status === 'failed'))
+    return <span className="status-chip status-chip--red">Failed</span>;
+  if (results.some((r) => r.status === 'success'))
+    return <span className="status-chip status-chip--green">Success</span>;
+  return <span className="status-chip status-chip--gray">Skipped</span>;
+};
+
 export const DashboardNotificationsPage = (): JSX.Element => {
   const { session } = useAuth();
   const [managedDaos, setManagedDaos] = useState<DaoItem[]>([]);
@@ -45,27 +53,18 @@ export const DashboardNotificationsPage = (): JSX.Element => {
       try {
         const [profile, daos] = await Promise.all([getAuthProfile(session.accessToken), getDaos({ limit: 100 })]);
         const ownDaos = daos.filter((dao) => dao.createdBy === profile.id);
-
-        if (!isMounted) {
-          return;
-        }
+        if (!isMounted) return;
 
         setManagedDaos(ownDaos);
 
         if (ownDaos.length === 0) {
-          setSelectedDaoId(null);
-          setWorkflows([]);
-          setSelectedWorkflowId(null);
-          setEvents([]);
+          setSelectedDaoId(null); setWorkflows([]); setSelectedWorkflowId(null); setEvents([]);
           return;
         }
 
-        const daoId = ownDaos[0].id;
-        setSelectedDaoId(daoId);
+        setSelectedDaoId(ownDaos[0].id);
       } catch (loadError) {
-        if (!isMounted) {
-          return;
-        }
+        if (!isMounted) return;
 
         if (loadError instanceof ApiRequestError && loadError.status === 403) {
           setError('You are not allowed to read workflows for this DAO.');
@@ -73,24 +72,17 @@ export const DashboardNotificationsPage = (): JSX.Element => {
           setError(loadError instanceof Error ? loadError.message : 'Unable to load workflows');
         }
       } finally {
-        if (isMounted) {
-          setIsLoadingDaos(false);
-        }
+        if (isMounted) setIsLoadingDaos(false);
       }
     };
 
     void loadDaos();
-
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, [session?.accessToken]);
 
   useEffect(() => {
     if (!selectedDaoId || !session?.accessToken) {
-      setWorkflows([]);
-      setSelectedWorkflowId(null);
-      setIsLoadingWorkflows(false);
+      setWorkflows([]); setSelectedWorkflowId(null); setIsLoadingWorkflows(false);
       return;
     }
 
@@ -101,41 +93,29 @@ export const DashboardNotificationsPage = (): JSX.Element => {
       setError(null);
 
       try {
-        const loadedWorkflows = await getWorkflows(selectedDaoId, session.accessToken, { limit: 100 });
-        if (!isMounted) {
-          return;
-        }
-
-        setWorkflows(loadedWorkflows);
-        setSelectedWorkflowId(loadedWorkflows[0]?.id ?? null);
+        const loaded = await getWorkflows(selectedDaoId, session.accessToken, { limit: 100 });
+        if (!isMounted) return;
+        setWorkflows(loaded);
+        setSelectedWorkflowId(loaded[0]?.id ?? null);
       } catch (loadError) {
-        if (!isMounted) {
-          return;
-        }
-
+        if (!isMounted) return;
         if (loadError instanceof ApiRequestError && loadError.status === 403) {
           setError('You are not allowed to read workflows for this DAO.');
         } else {
           setError(loadError instanceof Error ? loadError.message : 'Unable to load workflows');
         }
       } finally {
-        if (isMounted) {
-          setIsLoadingWorkflows(false);
-        }
+        if (isMounted) setIsLoadingWorkflows(false);
       }
     };
 
     void loadWorkflows();
-
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, [selectedDaoId, session?.accessToken]);
 
   useEffect(() => {
     if (!selectedWorkflowId || !session?.accessToken) {
-      setEvents([]);
-      setIsLoadingEvents(false);
+      setEvents([]); setIsLoadingEvents(false);
       return;
     }
 
@@ -147,61 +127,39 @@ export const DashboardNotificationsPage = (): JSX.Element => {
 
       try {
         const items = await getWorkflowEvents(selectedWorkflowId, session.accessToken, { limit: 100 });
-        if (isMounted) {
-          setEvents(items);
-        }
+        if (isMounted) setEvents(items);
       } catch (loadError) {
-        if (!isMounted) {
-          return;
-        }
-
+        if (!isMounted) return;
         if (loadError instanceof ApiRequestError && loadError.status === 403) {
           setError('You are not allowed to read workflow events for this rule.');
         } else {
           setError(loadError instanceof Error ? loadError.message : 'Unable to load workflow events');
         }
       } finally {
-        if (isMounted) {
-          setIsLoadingEvents(false);
-        }
+        if (isMounted) setIsLoadingEvents(false);
       }
     };
 
     void loadEvents();
-
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, [selectedWorkflowId, session?.accessToken]);
 
   const successfulActions = useMemo(
-    () =>
-      events
-        .flatMap((event) => event.actionResults)
-        .filter((result) => result.status === 'success').length,
+    () => events.flatMap((event) => event.actionResults).filter((r) => r.status === 'success').length,
     [events],
   );
   const isLoading = isLoadingDaos || isLoadingWorkflows || isLoadingEvents;
 
   return (
-    <DashboardShell
-      title="Notifications"
-      description="Workflow event history and action delivery outcomes from real evaluations."
-    >
+    <DashboardShell title="Notifications" description="Workflow event history and action delivery outcomes from real evaluations.">
       <DaoSelect daos={managedDaos} selectedDaoId={selectedDaoId} onSelect={setSelectedDaoId} />
 
       {workflows.length > 0 ? (
         <label className="select-field">
           <span>Workflow</span>
-          <select
-            value={selectedWorkflowId ?? workflows[0]?.id}
-            onChange={(event) => setSelectedWorkflowId(event.target.value)}
-            className="select-input"
-          >
+          <select value={selectedWorkflowId ?? workflows[0]?.id} onChange={(event) => setSelectedWorkflowId(event.target.value)} className="select-input">
             {workflows.map((workflow) => (
-              <option key={workflow.id} value={workflow.id}>
-                {workflow.name}
-              </option>
+              <option key={workflow.id} value={workflow.id}>{workflow.name}</option>
             ))}
           </select>
         </label>
@@ -222,13 +180,9 @@ export const DashboardNotificationsPage = (): JSX.Element => {
       {!isLoading && !error && events.length > 0 ? (
         <>
           <div className="metric-grid">
-            <article className="metric-card">
-              <p>Events logged</p>
-              <h3>{events.length}</h3>
-            </article>
-            <article className="metric-card">
-              <p>Successful actions</p>
-              <h3>{successfulActions}</h3>
+            <article className="metric-card"><p>Events logged</p><h3>{events.length}</h3></article>
+            <article className={`metric-card${successfulActions > 0 ? ' metric-card-accent' : ''}`}>
+              <p>Successful actions</p><h3>{successfulActions}</h3>
             </article>
           </div>
 
@@ -247,16 +201,14 @@ export const DashboardNotificationsPage = (): JSX.Element => {
                 {events.map((event) => (
                   <tr key={event.id}>
                     <td>{formatDateTime(event.firedAt)}</td>
-                    <td>{event.triggerType}</td>
-                    <td>{event.matched ? 'Yes' : 'No'}</td>
-                    <td>{event.actionResults.length}</td>
+                    <td><span className="status-chip status-chip--gray">{event.triggerType}</span></td>
                     <td>
-                      {event.actionResults.some((result) => result.status === 'failed')
-                        ? 'Failed'
-                        : event.actionResults.some((result) => result.status === 'success')
-                          ? 'Success'
-                          : 'Skipped'}
+                      <span className={`status-chip ${event.matched ? 'status-chip--green' : 'status-chip--gray'}`}>
+                        {event.matched ? 'Yes' : 'No'}
+                      </span>
                     </td>
+                    <td>{event.actionResults.length}</td>
+                    <td>{resultChip(event.actionResults)}</td>
                   </tr>
                 ))}
               </tbody>
