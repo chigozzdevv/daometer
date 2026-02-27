@@ -100,78 +100,54 @@ const sendPreparedTransaction = async (
   transactionBase64: string,
 ): Promise<string> => {
   const errors: string[] = [];
+  const isPhantomProvider =
+    typeof window !== 'undefined' &&
+    ((window as unknown as { phantom?: { solana?: SolanaProvider } }).phantom?.solana === provider);
 
   if (typeof provider.request === 'function') {
-    const requestVariants: Array<{ label: string; params: unknown }> = [
-      {
-        label: 'request(transaction-base58)',
-        params: {
-          transaction: transactionBase58,
-          options: {
-            skipPreflight: false,
-            preflightCommitment: 'confirmed',
-          },
-        },
-      },
-      {
-        label: 'request([transaction-base58])',
-        params: [
+    const requestVariants: Array<{ label: string; params: unknown }> = isPhantomProvider
+      ? [
+          // Phantom's injected provider expects base58 string payloads for request().
+          { label: 'request(transaction-base58-string)', params: transactionBase58 },
+          { label: 'request(message-base58-string)', params: transactionMessage },
+          { label: 'request(transaction-base58-object)', params: { transaction: transactionBase58 } },
+          { label: 'request(message-object)', params: { message: transactionMessage } },
+        ]
+      : [
+          { label: 'request(transaction-base58-string)', params: transactionBase58 },
+          { label: 'request([transaction-base58-string])', params: [transactionBase58] },
           {
-            transaction: transactionBase58,
-            options: {
-              skipPreflight: false,
-              preflightCommitment: 'confirmed',
+            label: 'request(transaction-base58-object)',
+            params: {
+              transaction: transactionBase58,
+              options: {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed',
+              },
             },
           },
-        ],
-      },
-      {
-        label: 'request(message-object)',
-        params: {
-          message: transactionMessage,
-          options: {
-            skipPreflight: false,
-            preflightCommitment: 'confirmed',
-          },
-        },
-      },
-      {
-        label: 'request([message-object])',
-        params: [
           {
-            message: transactionMessage,
-            options: {
-              skipPreflight: false,
-              preflightCommitment: 'confirmed',
+            label: 'request(message-object)',
+            params: {
+              message: transactionMessage,
+              options: {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed',
+              },
             },
           },
-        ],
-      },
-      {
-        label: 'request(transaction-base64)',
-        params: {
-          transaction: transactionBase64,
-          encoding: 'base64',
-          options: {
-            skipPreflight: false,
-            preflightCommitment: 'confirmed',
-          },
-        },
-      },
-      {
-        label: 'request([transaction-base64])',
-        params: [
           {
-            transaction: transactionBase64,
-            encoding: 'base64',
-            options: {
-              skipPreflight: false,
-              preflightCommitment: 'confirmed',
+            label: 'request(transaction-base64-object)',
+            params: {
+              transaction: transactionBase64,
+              encoding: 'base64',
+              options: {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed',
+              },
             },
           },
-        ],
-      },
-    ];
+        ];
 
     for (const variant of requestVariants) {
       try {
@@ -196,6 +172,7 @@ const sendPreparedTransaction = async (
     const transactionBytes = base64ToBytes(transactionBase64);
     const directVariants: Array<{ label: string; payload: unknown }> = [
       { label: 'signAndSend(bytes)', payload: transactionBytes },
+      { label: 'signAndSend(base58-string)', payload: transactionBase58 },
       { label: 'signAndSend(base64-string)', payload: transactionBase64 },
       { label: 'signAndSend(message-object)', payload: { message: transactionMessage } },
     ];
@@ -218,7 +195,7 @@ const sendPreparedTransaction = async (
     }
   }
 
-  const details = errors[0] ? ` First error: ${errors[0]}` : '';
+  const details = errors.length > 0 ? ` Attempts: ${errors.slice(0, 3).join(' | ')}` : '';
   throw new Error(`Wallet could not sign and send the prepared transaction.${details}`);
 };
 
