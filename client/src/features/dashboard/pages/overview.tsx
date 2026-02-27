@@ -55,10 +55,12 @@ export const DashboardOverviewPage = (): JSX.Element => {
         if (session?.accessToken) {
           const profile = await getAuthProfile(session.accessToken);
           managedDaos = daos.filter((dao) => dao.createdBy === profile.id);
+          const managedDaoIds = new Set(managedDaos.map((dao) => dao.id));
+          const managedFlows = flows.filter((flow) => managedDaoIds.has(flow.daoId));
 
           const workflowLists = await Promise.all(
-            managedDaos.map((dao) =>
-              getWorkflows({ daoId: dao.id }, session.accessToken).catch((workflowError) => {
+            managedFlows.map((flow) =>
+              getWorkflows(flow.id, session.accessToken).catch((workflowError) => {
                 if (workflowError instanceof ApiRequestError && workflowError.status === 403) {
                   return [];
                 }

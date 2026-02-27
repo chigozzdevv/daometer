@@ -29,8 +29,7 @@ export const list = asyncHandler(async (req: Request, res: Response) => {
   }
 
   const query = req.query as unknown as {
-    daoId?: string;
-    flowId?: string;
+    flowId: string;
     enabled?: boolean;
     page: number;
     limit: number;

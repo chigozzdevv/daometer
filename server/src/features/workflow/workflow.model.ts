@@ -301,7 +301,7 @@ const workflowRuleSchema = new Schema<WorkflowRule>(
   },
 );
 
-workflowRuleSchema.index({ daoId: 1, name: 1 }, { unique: true });
+workflowRuleSchema.index({ flowId: 1, name: 1 }, { unique: true });
 workflowRuleSchema.index({ daoId: 1, enabled: 1 });
 workflowRuleSchema.index({ flowId: 1, enabled: 1 });
 

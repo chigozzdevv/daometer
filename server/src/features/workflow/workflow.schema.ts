@@ -111,23 +111,12 @@ export const getWorkflowRuleSchema = z.object({
 export const listWorkflowRuleSchema = z.object({
   body: emptyObject,
   params: emptyObject,
-  query: z
-    .object({
-      daoId: objectIdSchema.optional(),
-      flowId: objectIdSchema.optional(),
-      enabled: z.coerce.boolean().optional(),
-      page: z.coerce.number().int().min(1).default(1),
-      limit: z.coerce.number().int().min(1).max(100).default(20),
-    })
-    .superRefine((value, ctx) => {
-      if (!value.daoId && !value.flowId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['flowId'],
-          message: 'flowId or daoId is required',
-        });
-      }
-    }),
+  query: z.object({
+    flowId: objectIdSchema,
+    enabled: z.coerce.boolean().optional(),
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+  }),
 });
 
 export const listWorkflowEventSchema = z.object({

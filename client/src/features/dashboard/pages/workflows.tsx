@@ -14,7 +14,6 @@ import {
   type WorkflowProposalState,
   type WorkflowTriggerType,
 } from '@/features/dashboard/api/api';
-import { DaoSelect } from '@/features/dashboard/components/dao-select';
 import { DashboardShell } from '@/features/dashboard/components/shell';
 import { EmptyState, ErrorState, LoadingState } from '@/features/dashboard/components/state';
 import { ApiRequestError } from '@/shared/lib/api-client';
@@ -45,7 +44,6 @@ const actionOptionMap: Array<{ value: WorkflowActionType; label: string; require
 export const DashboardWorkflowsPage = (): JSX.Element => {
   const { session } = useAuth();
   const [allDaos, setAllDaos] = useState<DaoItem[]>([]);
-  const [selectedDaoId, setSelectedDaoId] = useState<string | null>(null);
   const [flows, setFlows] = useState<FlowItem[]>([]);
   const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
   const [workflows, setWorkflows] = useState<WorkflowItem[]>([]);
@@ -95,15 +93,11 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
         setAllDaos(managedDaos);
 
         if (managedDaos.length === 0) {
-          setSelectedDaoId(null);
           setSelectedFlowId(null);
           setFlows([]);
           setWorkflows([]);
           return;
         }
-
-        const daoId = managedDaos[0].id;
-        setSelectedDaoId(daoId);
       } catch (loadError) {
         if (!isMounted) {
           return;
@@ -129,7 +123,7 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
   }, [session?.accessToken]);
 
   useEffect(() => {
-    if (!session?.accessToken || !selectedDaoId) {
+    if (!session?.accessToken || allDaos.length === 0) {
       setFlows([]);
       setSelectedFlowId(null);
       setIsLoadingFlows(false);
@@ -143,7 +137,8 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
       setError(null);
 
       try {
-        const loaded = await getFlows({ daoId: selectedDaoId, limit: 100 });
+        const managedDaoIds = new Set(allDaos.map((dao) => dao.id));
+        const loaded = (await getFlows({ limit: 100 })).filter((flow) => managedDaoIds.has(flow.daoId));
 
         if (!isMounted) {
           return;
@@ -169,7 +164,7 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
     return () => {
       isMounted = false;
     };
-  }, [selectedDaoId, session?.accessToken]);
+  }, [allDaos, session?.accessToken]);
 
   useEffect(() => {
     if (!session?.accessToken || !selectedFlowId) {
@@ -185,7 +180,7 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
       setError(null);
 
       try {
-        const rules = await getWorkflows({ flowId: selectedFlowId }, session.accessToken, { limit: 100 });
+        const rules = await getWorkflows(selectedFlowId, session.accessToken, { limit: 100 });
 
         if (!isMounted) {
           return;
@@ -198,7 +193,7 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
         }
 
         if (loadError instanceof ApiRequestError && loadError.status === 403) {
-          setError('You can only view workflows for DAOs you manage.');
+          setError('You can only view workflows for the selected flow.');
         } else {
           setError(loadError instanceof Error ? loadError.message : 'Unable to load workflows');
         }
@@ -365,7 +360,6 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
 
   return (
     <DashboardShell title="Workflows" description="Create rule-based automations for proposal reminders, approvals, and execution.">
-      <DaoSelect daos={allDaos} selectedDaoId={selectedDaoId} onSelect={setSelectedDaoId} />
       {allDaos.length > 0 ? (
         <label className="input-label inline-select">
           <span>Flow</span>
@@ -525,7 +519,7 @@ export const DashboardWorkflowsPage = (): JSX.Element => {
       ) : null}
 
       {!isLoading && !error && allDaos.length > 0 && flows.length === 0 ? (
-        <EmptyState message="No flows found for this DAO. Create a flow first." />
+        <EmptyState message="No flows found yet. Create a flow first." />
       ) : null}
 
       {!isLoading && !error && workflows.length === 0 && allDaos.length > 0 && selectedFlowId ? (

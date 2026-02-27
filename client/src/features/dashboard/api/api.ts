@@ -809,14 +809,13 @@ export const prepareProposalOnchainExecution = async (
   });
 
 export const getWorkflows = async (
-  scope: { daoId?: string; flowId?: string },
+  flowId: string,
   accessToken: string,
   options: ListOptions & { enabled?: boolean } = {},
 ): Promise<WorkflowItem[]> =>
   apiRequest<WorkflowItem[]>(
     `/workflows${buildQuery({
-      daoId: scope.daoId,
-      flowId: scope.flowId,
+      flowId,
       enabled: options.enabled,
       page: options.page ?? 1,
       limit: options.limit ?? 100,

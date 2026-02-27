@@ -3,13 +3,14 @@ import { useAuth } from '@/app/providers/auth-provider';
 import {
   getAuthProfile,
   getDaos,
+  getFlows,
   getWorkflowEvents,
   getWorkflows,
   type DaoItem,
+  type FlowItem,
   type WorkflowEventItem,
   type WorkflowItem,
 } from '@/features/dashboard/api/api';
-import { DaoSelect } from '@/features/dashboard/components/dao-select';
 import { DashboardShell } from '@/features/dashboard/components/shell';
 import { EmptyState, ErrorState, LoadingState } from '@/features/dashboard/components/state';
 import { formatDateTime } from '@/features/dashboard/lib/format';
@@ -26,11 +27,13 @@ const resultChip = (results: WorkflowEventItem['actionResults']): JSX.Element =>
 export const DashboardNotificationsPage = (): JSX.Element => {
   const { session } = useAuth();
   const [managedDaos, setManagedDaos] = useState<DaoItem[]>([]);
-  const [selectedDaoId, setSelectedDaoId] = useState<string | null>(null);
+  const [flows, setFlows] = useState<FlowItem[]>([]);
+  const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
   const [workflows, setWorkflows] = useState<WorkflowItem[]>([]);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
   const [events, setEvents] = useState<WorkflowEventItem[]>([]);
   const [isLoadingDaos, setIsLoadingDaos] = useState(true);
+  const [isLoadingFlows, setIsLoadingFlows] = useState(true);
   const [isLoadingWorkflows, setIsLoadingWorkflows] = useState(true);
   const [isLoadingEvents, setIsLoadingEvents] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +45,7 @@ export const DashboardNotificationsPage = (): JSX.Element => {
       if (!session?.accessToken) {
         setError('Sign in to load notification history.');
         setIsLoadingDaos(false);
+        setIsLoadingFlows(false);
         setIsLoadingWorkflows(false);
         setIsLoadingEvents(false);
         return;
@@ -58,16 +62,14 @@ export const DashboardNotificationsPage = (): JSX.Element => {
         setManagedDaos(ownDaos);
 
         if (ownDaos.length === 0) {
-          setSelectedDaoId(null); setWorkflows([]); setSelectedWorkflowId(null); setEvents([]);
+          setFlows([]); setSelectedFlowId(null); setWorkflows([]); setSelectedWorkflowId(null); setEvents([]);
           return;
         }
-
-        setSelectedDaoId(ownDaos[0].id);
       } catch (loadError) {
         if (!isMounted) return;
 
         if (loadError instanceof ApiRequestError && loadError.status === 403) {
-          setError('You are not allowed to read workflows for this DAO.');
+          setError('You are not allowed to read workflows.');
         } else {
           setError(loadError instanceof Error ? loadError.message : 'Unable to load workflows');
         }
@@ -81,7 +83,37 @@ export const DashboardNotificationsPage = (): JSX.Element => {
   }, [session?.accessToken]);
 
   useEffect(() => {
-    if (!selectedDaoId || !session?.accessToken) {
+    if (managedDaos.length === 0 || !session?.accessToken) {
+      setFlows([]); setSelectedFlowId(null); setIsLoadingFlows(false);
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadFlows = async (): Promise<void> => {
+      setIsLoadingFlows(true);
+      setError(null);
+
+      try {
+        const managedDaoIds = new Set(managedDaos.map((dao) => dao.id));
+        const loaded = (await getFlows({ limit: 100 })).filter((flow) => managedDaoIds.has(flow.daoId));
+        if (!isMounted) return;
+        setFlows(loaded);
+        setSelectedFlowId((current) => (current && loaded.some((flow) => flow.id === current) ? current : loaded[0]?.id ?? null));
+      } catch (loadError) {
+        if (!isMounted) return;
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load flows');
+      } finally {
+        if (isMounted) setIsLoadingFlows(false);
+      }
+    };
+
+    void loadFlows();
+    return () => { isMounted = false; };
+  }, [managedDaos, session?.accessToken]);
+
+  useEffect(() => {
+    if (!selectedFlowId || !session?.accessToken) {
       setWorkflows([]); setSelectedWorkflowId(null); setIsLoadingWorkflows(false);
       return;
     }
@@ -93,14 +125,14 @@ export const DashboardNotificationsPage = (): JSX.Element => {
       setError(null);
 
       try {
-        const loaded = await getWorkflows({ daoId: selectedDaoId }, session.accessToken, { limit: 100 });
+        const loaded = await getWorkflows(selectedFlowId, session.accessToken, { limit: 100 });
         if (!isMounted) return;
         setWorkflows(loaded);
-        setSelectedWorkflowId(loaded[0]?.id ?? null);
+        setSelectedWorkflowId((current) => (current && loaded.some((workflow) => workflow.id === current) ? current : loaded[0]?.id ?? null));
       } catch (loadError) {
         if (!isMounted) return;
         if (loadError instanceof ApiRequestError && loadError.status === 403) {
-          setError('You are not allowed to read workflows for this DAO.');
+          setError('You are not allowed to read workflows for this flow.');
         } else {
           setError(loadError instanceof Error ? loadError.message : 'Unable to load workflows');
         }
@@ -111,7 +143,7 @@ export const DashboardNotificationsPage = (): JSX.Element => {
 
     void loadWorkflows();
     return () => { isMounted = false; };
-  }, [selectedDaoId, session?.accessToken]);
+  }, [selectedFlowId, session?.accessToken]);
 
   useEffect(() => {
     if (!selectedWorkflowId || !session?.accessToken) {
@@ -148,11 +180,20 @@ export const DashboardNotificationsPage = (): JSX.Element => {
     () => events.flatMap((event) => event.actionResults).filter((r) => r.status === 'success').length,
     [events],
   );
-  const isLoading = isLoadingDaos || isLoadingWorkflows || isLoadingEvents;
+  const isLoading = isLoadingDaos || isLoadingFlows || isLoadingWorkflows || isLoadingEvents;
 
   return (
     <DashboardShell title="Notifications" description="Workflow event history and action delivery outcomes from real evaluations.">
-      <DaoSelect daos={managedDaos} selectedDaoId={selectedDaoId} onSelect={setSelectedDaoId} />
+      {flows.length > 0 ? (
+        <label className="select-field">
+          <span>Flow</span>
+          <select value={selectedFlowId ?? flows[0]?.id} onChange={(event) => setSelectedFlowId(event.target.value)} className="select-input">
+            {flows.map((flow) => (
+              <option key={flow.id} value={flow.id}>{flow.name}</option>
+            ))}
+          </select>
+        </label>
+      ) : null}
 
       {workflows.length > 0 ? (
         <label className="select-field">
@@ -170,8 +211,11 @@ export const DashboardNotificationsPage = (): JSX.Element => {
       {!isLoading && !error && managedDaos.length === 0 ? (
         <EmptyState message="You do not manage any DAO yet, so there are no notification events to display." />
       ) : null}
-      {!isLoading && !error && managedDaos.length > 0 && workflows.length === 0 ? (
-        <EmptyState message="No workflow rules exist for this DAO." />
+      {!isLoading && !error && managedDaos.length > 0 && flows.length === 0 ? (
+        <EmptyState message="No flows exist yet." />
+      ) : null}
+      {!isLoading && !error && managedDaos.length > 0 && flows.length > 0 && workflows.length === 0 ? (
+        <EmptyState message="No workflow rules exist for this flow." />
       ) : null}
       {!isLoading && !error && workflows.length > 0 && events.length === 0 ? (
         <EmptyState message="No workflow events have fired yet for this rule." />

@@ -39,8 +39,7 @@ type CreateWorkflowRuleInput = {
 type UpdateWorkflowRuleInput = Partial<Omit<CreateWorkflowRuleInput, 'daoId'>>;
 
 type ListWorkflowRulesInput = {
-  daoId?: string;
-  flowId?: string;
+  flowId: string;
   enabled?: boolean;
   page: number;
   limit: number;
@@ -540,23 +539,17 @@ export const listWorkflowRules = async (
   items: WorkflowRuleDocument[];
   pagination: { page: number; limit: number; total: number; totalPages: number };
 }> => {
-  const filter: Record<string, unknown> = {};
+  const flow = await FlowModel.findById(input.flowId).select('daoId');
 
-  if (input.flowId) {
-    const flow = await FlowModel.findById(input.flowId).select('daoId');
-
-    if (!flow) {
-      throw new AppError('Flow not found', 404, 'FLOW_NOT_FOUND');
-    }
-
-    await assertCanManageDao(flow.daoId, userId);
-    filter.flowId = flow._id;
-  } else if (input.daoId) {
-    await assertCanManageDao(input.daoId, userId);
-    filter.daoId = new Types.ObjectId(input.daoId);
-  } else {
-    throw new AppError('flowId or daoId is required', 400, 'WORKFLOW_SCOPE_REQUIRED');
+  if (!flow) {
+    throw new AppError('Flow not found', 404, 'FLOW_NOT_FOUND');
   }
+
+  await assertCanManageDao(flow.daoId, userId);
+
+  const filter: Record<string, unknown> = {
+    flowId: flow._id,
+  };
 
   if (typeof input.enabled === 'boolean') {
     filter.enabled = input.enabled;
