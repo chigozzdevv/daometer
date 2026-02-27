@@ -146,8 +146,8 @@ export const DashboardFlowsPage = (): JSX.Element => {
         <article className="flow-step-card">
           <header className="editor-header">
             <div>
-              <h2>No Flow Open</h2>
-              <p>Create a new flow or open an existing one.</p>
+              <h2>No Flow Found</h2>
+              <p>Create a new flow.</p>
             </div>
           </header>
 
