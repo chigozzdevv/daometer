@@ -815,21 +815,23 @@ p {
 
 
 .dashboard-shell {
-  width: min(1280px, calc(100% - 1.4rem));
-  margin: 0.8rem auto;
-  min-height: calc(100vh - 1.6rem);
-  display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-  gap: 0.9rem;
+  min-height: 100vh;
+  padding: 0.8rem;
 }
 
 .dashboard-sidebar {
+  position: fixed;
+  top: 0.8rem;
+  bottom: 0.8rem;
+  left: 0.8rem;
+  width: 240px;
   border: var(--border);
   padding: 1rem 0.8rem;
   background: var(--white);
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
+  overflow-y: auto;
 }
 
 .dashboard-brand {
@@ -860,16 +862,24 @@ p {
 }
 
 .dashboard-content-area {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 0.8rem;
+  margin-left: calc(240px + 1.7rem);
+  min-height: calc(100vh - 1.6rem);
 }
 
 .dashboard-topbar {
+  position: fixed;
+  top: 0.8rem;
+  left: calc(240px + 1.7rem);
+  right: 0.8rem;
+  z-index: 1000;
   border: var(--border);
   background: var(--white);
   padding: 0.95rem 1rem;
   border-left: 4px solid var(--yellow);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
 }
 
 .dashboard-topbar-kicker {
@@ -887,11 +897,21 @@ p {
   letter-spacing: -0.02em;
 }
 
+.dashboard-topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
 .dashboard-main-panel {
+  margin-top: 5.8rem;
   border: var(--border);
   background: var(--white);
   padding: 1.1rem;
   box-shadow: var(--shadow);
+  min-height: calc(100vh - 7.4rem);
 }
 
 .dashboard-page-shell {
@@ -1321,19 +1341,40 @@ p {
   }
 
   .dashboard-shell {
-    grid-template-columns: 1fr;
+    padding: 0.6rem;
   }
 
   .dashboard-sidebar {
+    position: static;
+    width: 100%;
+    top: auto;
+    bottom: auto;
+    left: auto;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: start;
+    overflow: visible;
   }
 
   .dashboard-brand,
-  .dashboard-sidebar-nav,
-  .dashboard-sidebar .ghost-button {
+  .dashboard-sidebar-nav {
     grid-column: span 2;
+  }
+
+  .dashboard-content-area {
+    margin-left: 0;
+    min-height: auto;
+  }
+
+  .dashboard-topbar {
+    position: static;
+    left: auto;
+    right: auto;
+  }
+
+  .dashboard-main-panel {
+    margin-top: 0.8rem;
+    min-height: auto;
   }
 
   .editor-grid {

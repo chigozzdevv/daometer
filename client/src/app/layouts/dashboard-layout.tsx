@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { navItems } from '@/app/constants/nav-items';
 import { useAuth } from '@/app/providers/auth-provider';
 import { getAuthProfile } from '@/features/dashboard/api/api';
+import { shortAddress } from '@/features/dashboard/lib/format';
 
 const navLinkClassName = ({ isActive }: { isActive: boolean }): string =>
   `dashboard-sidebar-link${isActive ? ' dashboard-sidebar-link-active' : ''}`;
@@ -11,6 +12,7 @@ export const DashboardLayout = (): JSX.Element => {
   const navigate = useNavigate();
   const { session, signOut } = useAuth();
   const [isAdmin, setIsAdmin] = useState(false);
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -18,6 +20,7 @@ export const DashboardLayout = (): JSX.Element => {
     const loadProfile = async (): Promise<void> => {
       if (!session?.accessToken) {
         setIsAdmin(false);
+        setWalletAddress(null);
         return;
       }
 
@@ -25,10 +28,12 @@ export const DashboardLayout = (): JSX.Element => {
         const profile = await getAuthProfile(session.accessToken);
         if (isMounted) {
           setIsAdmin(profile.roles.includes('admin'));
+          setWalletAddress(profile.walletAddress);
         }
       } catch {
         if (isMounted) {
           setIsAdmin(false);
+          setWalletAddress(null);
         }
       }
     };
@@ -45,7 +50,7 @@ export const DashboardLayout = (): JSX.Element => {
     [isAdmin],
   );
 
-  const handleSignOut = (): void => {
+  const handleDisconnect = (): void => {
     signOut();
     navigate('/');
   };
@@ -61,15 +66,22 @@ export const DashboardLayout = (): JSX.Element => {
             </NavLink>
           ))}
         </nav>
-        <button type="button" className="ghost-button" onClick={handleSignOut}>
-          Sign out
-        </button>
       </aside>
 
       <main className="dashboard-content-area">
         <header className="dashboard-topbar">
-          <p className="dashboard-topbar-kicker">Automation Workspace</p>
-          <p className="dashboard-topbar-title">Operations Console</p>
+          <div>
+            <p className="dashboard-topbar-kicker">Automation Workspace</p>
+            <p className="dashboard-topbar-title">Operations Console</p>
+          </div>
+          <div className="dashboard-topbar-actions">
+            <span className="status-chip status-chip--gray">
+              {walletAddress ? shortAddress(walletAddress, 6) : 'No wallet'}
+            </span>
+            <button type="button" className="secondary-button" onClick={handleDisconnect}>
+              Disconnect
+            </button>
+          </div>
         </header>
 
         <section className="dashboard-main-panel">
