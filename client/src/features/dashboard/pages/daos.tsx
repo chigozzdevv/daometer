@@ -142,8 +142,8 @@ const withInputErrorClass = (baseClass: string, hasError: boolean): string =>
 const getExplorerAddressUrl = (address: string, network: DaoNetwork): string =>
   `https://explorer.solana.com/address/${address}${network === 'devnet' ? '?cluster=devnet' : ''}`;
 
-const getRealmsUrl = (network: DaoNetwork): string =>
-  `https://v2.realms.today${network === 'devnet' ? '?cluster=devnet' : ''}`;
+const getRealmDetailUrl = (realmAddress: string, network: DaoNetwork): string =>
+  `https://app.realms.today/dao/${realmAddress}${network === 'devnet' ? '?cluster=devnet' : ''}`;
 
 const deserializePreparedTransaction = (transactionBase64: string): Transaction | VersionedTransaction => {
   const transactionBytes = base64ToBytes(transactionBase64);
@@ -1136,7 +1136,12 @@ export const DashboardDaosPage = (): JSX.Element => {
               </div>
 
               <div className="dao-card-actions">
-                <a className="secondary-button" href={getRealmsUrl(dao.network)} target="_blank" rel="noreferrer">
+                <a
+                  className="secondary-button"
+                  href={getRealmDetailUrl(dao.realmAddress, dao.network)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
                   Open in Realms
                 </a>
                 <a
