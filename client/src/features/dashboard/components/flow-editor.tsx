@@ -23,6 +23,8 @@ const canvasNodeHeight = 210;
 const defaultNodeWidth = 360;
 const minNodeWidth = 280;
 const maxNodeWidth = 560;
+const canvasBoardWidth = 1680;
+const canvasBoardHeight = 2400;
 const PLACEHOLDER_PUBKEY = '11111111111111111111111111111111';
 const PLACEHOLDER_BASE64 = 'AQ==';
 
@@ -420,22 +422,6 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
         .filter((item): item is { id: string; path: string } => Boolean(item)),
     [graphEdges, graphNodeMap, nodeWidths],
   );
-
-  const canvasSize = useMemo(() => {
-    const maxRight = graphNodes.reduce((currentMax, node) => {
-      const nodeWidth = nodeWidths[node.id] ?? defaultNodeWidth;
-      return Math.max(currentMax, node.x + nodeWidth);
-    }, 0);
-    const maxBottom = graphNodes.reduce(
-      (currentMax, node) => Math.max(currentMax, node.y + canvasNodeHeight),
-      0,
-    );
-
-    return {
-      width: Math.max(1180, maxRight + 80),
-      height: Math.max(760, maxBottom + 80),
-    };
-  }, [graphNodes, nodeWidths]);
 
   const markDirty = (): void => {
     if (!isHydrating) {
@@ -1313,17 +1299,24 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
         <div className="flow-stepper">
           <button
             type="button"
+            className={`flow-stepper-item ${activeStep === 'builder' ? 'flow-stepper-item-active' : ''}`}
+            onClick={() => setActiveStep('builder')}
+          >
+            1. Builder
+          </button>
+          <button
+            type="button"
             className={`flow-stepper-item ${activeStep === 'compile' ? 'flow-stepper-item-active' : ''}`}
             onClick={() => setActiveStep('compile')}
           >
-            1. Compile
+            2. Compile
           </button>
           <button
             type="button"
             className={`flow-stepper-item ${activeStep === 'publish' ? 'flow-stepper-item-active' : ''}`}
             onClick={() => setActiveStep('publish')}
           >
-            2. Publish
+            3. Publish
           </button>
         </div>
       </article>
@@ -1332,7 +1325,6 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
         <article className="flow-step-card">
           <header className="flow-step-head">
             <div className="flow-step-head-main">
-              <span className="flow-step-index">Builder</span>
               <div>
                 <h2>{flowName}</h2>
                 <p>{flowDescription || 'No description'}</p>
@@ -1363,7 +1355,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
             <div
               className="flow-canvas-board"
               ref={canvasRef}
-              style={{ width: `${canvasSize.width}px`, height: `${canvasSize.height}px` }}
+              style={{ width: `${canvasBoardWidth}px`, height: `${canvasBoardHeight}px` }}
             >
               <svg className="flow-canvas-svg" aria-hidden="true">
                 {edgePaths.map((edge) => (
