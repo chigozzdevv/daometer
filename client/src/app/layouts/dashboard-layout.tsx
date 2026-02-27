@@ -1,13 +1,49 @@
+import { useEffect, useMemo, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { navItems } from '@/app/constants/nav-items';
 import { useAuth } from '@/app/providers/auth-provider';
+import { getAuthProfile } from '@/features/dashboard/api/api';
 
 const navLinkClassName = ({ isActive }: { isActive: boolean }): string =>
   `dashboard-sidebar-link${isActive ? ' dashboard-sidebar-link-active' : ''}`;
 
 export const DashboardLayout = (): JSX.Element => {
   const navigate = useNavigate();
-  const { signOut } = useAuth();
+  const { session, signOut } = useAuth();
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadProfile = async (): Promise<void> => {
+      if (!session?.accessToken) {
+        setIsAdmin(false);
+        return;
+      }
+
+      try {
+        const profile = await getAuthProfile(session.accessToken);
+        if (isMounted) {
+          setIsAdmin(profile.roles.includes('admin'));
+        }
+      } catch {
+        if (isMounted) {
+          setIsAdmin(false);
+        }
+      }
+    };
+
+    void loadProfile();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [session?.accessToken]);
+
+  const visibleNavItems = useMemo(
+    () => navItems.filter((item) => !item.requiresAdmin || isAdmin),
+    [isAdmin],
+  );
 
   const handleSignOut = (): void => {
     signOut();
@@ -19,7 +55,7 @@ export const DashboardLayout = (): JSX.Element => {
       <aside className="dashboard-sidebar">
         <p className="dashboard-brand">Daometer</p>
         <nav className="dashboard-sidebar-nav">
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <NavLink key={item.href} to={item.href} end={item.href === '/dashboard'} className={navLinkClassName}>
               {item.label}
             </NavLink>
