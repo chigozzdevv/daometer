@@ -1381,6 +1381,9 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
                 onNodesChange={handleNodesChange}
                 onEdgesChange={handleEdgesChange}
                 onConnect={handleConnect}
+                nodesDraggable
+                nodesConnectable
+                elementsSelectable
                 defaultViewport={{ x: 0, y: 0, zoom: 1 }}
                 minZoom={0.45}
                 maxZoom={1.5}
