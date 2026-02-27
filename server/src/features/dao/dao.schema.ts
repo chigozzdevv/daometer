@@ -27,6 +27,21 @@ export const createDaoSchema = z.object({
   query: emptyObject,
 });
 
+export const createDaoOnchainSchema = z.object({
+  body: z.object({
+    name: z.string().trim().min(2).max(120),
+    network: z.enum(['mainnet-beta', 'devnet']).default('devnet'),
+    communityMint: z.string().trim().regex(base58Regex, 'Invalid community mint'),
+    councilMint: z.string().trim().regex(base58Regex, 'Invalid council mint').optional(),
+    governanceProgramId: z.string().trim().regex(base58Regex, 'Invalid governance program id').optional(),
+    authorityWallet: z.string().trim().regex(base58Regex, 'Invalid authority wallet').optional(),
+    rpcUrl: z.string().trim().url().optional(),
+    programVersion: z.number().int().min(1).max(10).default(3),
+  }),
+  params: emptyObject,
+  query: emptyObject,
+});
+
 export const updateDaoSchema = z.object({
   body: z
     .object({

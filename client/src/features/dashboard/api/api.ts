@@ -21,6 +21,40 @@ export type DaoItem = {
   updatedAt: string;
 };
 
+export type CreateDaoInput = {
+  name: string;
+  description?: string;
+  network: 'mainnet-beta' | 'devnet';
+  realmAddress: string;
+  governanceProgramId: string;
+  authorityWallet: string;
+  communityMint?: string;
+  councilMint?: string;
+  slug?: string;
+};
+
+export type PrepareDaoOnchainInput = {
+  name: string;
+  network: 'mainnet-beta' | 'devnet';
+  communityMint: string;
+  councilMint?: string;
+  governanceProgramId?: string;
+  authorityWallet?: string;
+  rpcUrl?: string;
+  programVersion?: number;
+};
+
+export type PrepareDaoOnchainResult = {
+  transactionBase64: string;
+  realmAddress: string;
+  authorityWallet: string;
+  governanceProgramId: string;
+  rpcUrl: string;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
+  network: 'mainnet-beta' | 'devnet';
+};
+
 export type FlowItem = {
   id: string;
   daoId: string;
@@ -122,8 +156,8 @@ export type ExecutionJobItem = {
 
 export type AuthProfile = {
   id: string;
-  fullName: string;
-  email: string;
+  walletAddress: string;
+  displayName: string | null;
   roles: string[];
 };
 
@@ -288,6 +322,23 @@ export const getDaos = async (options: ListOptions = {}): Promise<DaoItem[]> =>
       limit: options.limit ?? 100,
     })}`,
   );
+
+export const createDao = async (input: CreateDaoInput, accessToken: string): Promise<DaoItem> =>
+  apiRequest<DaoItem>('/daos', {
+    method: 'POST',
+    body: input,
+    accessToken,
+  });
+
+export const prepareDaoOnchainCreate = async (
+  input: PrepareDaoOnchainInput,
+  accessToken: string,
+): Promise<PrepareDaoOnchainResult> =>
+  apiRequest<PrepareDaoOnchainResult>('/daos/onchain-create', {
+    method: 'POST',
+    body: input,
+    accessToken,
+  });
 
 export const getFlows = async (options: FlowListOptions = {}): Promise<FlowItem[]> =>
   apiRequest<FlowItem[]>(

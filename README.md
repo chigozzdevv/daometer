@@ -87,12 +87,13 @@ Configured by `API_PREFIX` (default: `/api/v1`).
 
 ## Main Endpoints
 
-- `POST /api/v1/auth/register`
-- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/challenge`
+- `POST /api/v1/auth/verify`
 - `POST /api/v1/auth/refresh`
 - `GET /api/v1/auth/me`
 - `GET /api/v1/daos`
 - `POST /api/v1/daos`
+- `POST /api/v1/daos/onchain-create`
 - `GET /api/v1/daos/:daoId`
 - `PATCH /api/v1/daos/:daoId`
 - `GET /api/v1/flows`
@@ -226,6 +227,11 @@ Current automatic onchain-creation support:
 
 If unsupported instruction kinds are present, automatic onchain creation/execution configuration is rejected.
 Internal proposal records use their own `proposalAddress` reference; onchain proposal addresses are tracked separately under `onchainExecution.proposalAddress`.
+
+DAO on-chain creation support:
+
+- `POST /api/v1/daos/onchain-create` prepares an unsigned Realm-creation transaction for wallet signing.
+- The connected user wallet is the fee payer/signer; backend only prepares metadata and stores DAO records when explicitly posted to `POST /api/v1/daos`.
 
 ## Notes
 

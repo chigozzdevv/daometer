@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { AppError } from '@/shared/errors/app-error';
 import { asyncHandler } from '@/shared/utils/async-handler.util';
-import { createDao, getDaoById, listDaos, updateDao } from '@/features/dao/dao.service';
+import { createDao, getDaoById, listDaos, prepareDaoOnchainCreate, updateDao } from '@/features/dao/dao.service';
 
 export const create = asyncHandler(async (req: Request, res: Response) => {
   if (!req.authUser) {
@@ -13,6 +13,19 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
   res.status(201).json({
     success: true,
     data: dao,
+  });
+});
+
+export const createOnchain = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.authUser) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const result = await prepareDaoOnchainCreate(req.body, req.authUser.userId);
+
+  res.status(201).json({
+    success: true,
+    data: result,
   });
 });
 

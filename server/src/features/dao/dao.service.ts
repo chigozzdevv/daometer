@@ -1,8 +1,15 @@
 import { Types } from 'mongoose';
+import BN from 'bn.js';
+import { PublicKey } from '@solana/web3.js';
+import { Connection, Transaction, type Commitment, type TransactionInstruction } from '@solana/web3.js';
+import { MintMaxVoteWeightSource, withCreateRealm } from '@realms-today/spl-governance';
 import { env } from '@/config/env.config';
+import { UserModel } from '@/features/auth/auth.model';
 import { DaoModel, type DaoDocument } from '@/features/dao/dao.model';
 import { AppError } from '@/shared/errors/app-error';
+import { SOLANA_PROGRAM_IDS } from '@/config/solana.config';
 import { toSlug } from '@/shared/utils/slug.util';
+import { assertCanManageDao } from '@/shared/utils/authorization.util';
 
 type CreateDaoInput = {
   name: string;
@@ -31,10 +38,52 @@ type UpdateDaoInput = {
   };
 };
 
+type PrepareDaoOnchainCreateInput = {
+  name: string;
+  network: 'mainnet-beta' | 'devnet';
+  communityMint: string;
+  councilMint?: string;
+  governanceProgramId?: string;
+  authorityWallet?: string;
+  rpcUrl?: string;
+  programVersion: number;
+};
+
+const normalizeAddress = (address: string, fieldName: string): string => {
+  try {
+    return new PublicKey(address).toBase58();
+  } catch {
+    throw new AppError(`Invalid ${fieldName}`, 400, 'INVALID_DAO_ADDRESS');
+  }
+};
+
+const defaultRpcByNetwork: Record<'devnet' | 'mainnet-beta', string> = {
+  devnet: 'https://api.devnet.solana.com',
+  'mainnet-beta': 'https://api.mainnet-beta.solana.com',
+};
+
 export const createDao = async (input: CreateDaoInput, userId: Types.ObjectId): Promise<DaoDocument> => {
+  const realmAddress = normalizeAddress(input.realmAddress, 'realm address');
+  const governanceProgramId = normalizeAddress(input.governanceProgramId, 'governance program id');
+  const authorityWallet = normalizeAddress(input.authorityWallet, 'authority wallet');
+  const communityMint = input.communityMint ? normalizeAddress(input.communityMint, 'community mint') : undefined;
+  const councilMint = input.councilMint ? normalizeAddress(input.councilMint, 'council mint') : undefined;
+
+  const creator = await UserModel.findById(userId).select('walletAddress roles');
+
+  if (!creator) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const isAdmin = creator.roles.includes('admin');
+
+  if (!isAdmin && creator.walletAddress !== authorityWallet) {
+    throw new AppError('Authority wallet must match your connected wallet', 403, 'DAO_AUTHORITY_WALLET_MISMATCH');
+  }
+
   const slug = input.slug ? toSlug(input.slug) : toSlug(input.name);
 
-  const existingDao = await DaoModel.findOne({ $or: [{ slug }, { realmAddress: input.realmAddress }] });
+  const existingDao = await DaoModel.findOne({ $or: [{ slug }, { realmAddress }] });
 
   if (existingDao) {
     if (existingDao.slug === slug) {
@@ -49,11 +98,11 @@ export const createDao = async (input: CreateDaoInput, userId: Types.ObjectId): 
     slug,
     description: input.description ?? '',
     network: input.network,
-    realmAddress: input.realmAddress,
-    governanceProgramId: input.governanceProgramId,
-    authorityWallet: input.authorityWallet,
-    communityMint: input.communityMint,
-    councilMint: input.councilMint,
+    realmAddress,
+    governanceProgramId,
+    authorityWallet,
+    communityMint,
+    councilMint,
     createdBy: userId,
     automationConfig: {
       autoExecuteEnabled: input.automationConfig?.autoExecuteEnabled ?? true,
@@ -61,6 +110,81 @@ export const createDao = async (input: CreateDaoInput, userId: Types.ObjectId): 
       requireSimulation: input.automationConfig?.requireSimulation ?? true,
     },
   });
+};
+
+export const prepareDaoOnchainCreate = async (
+  input: PrepareDaoOnchainCreateInput,
+  userId: Types.ObjectId,
+): Promise<{
+  transactionBase64: string;
+  realmAddress: string;
+  authorityWallet: string;
+  governanceProgramId: string;
+  rpcUrl: string;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
+  network: 'mainnet-beta' | 'devnet';
+}> => {
+  const creator = await UserModel.findById(userId).select('walletAddress roles');
+
+  if (!creator?.walletAddress) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const creatorWalletAddress = normalizeAddress(creator.walletAddress, 'creator wallet');
+  const requestedAuthorityWallet = input.authorityWallet
+    ? normalizeAddress(input.authorityWallet, 'authority wallet')
+    : creatorWalletAddress;
+  const isAdmin = creator.roles.includes('admin');
+
+  if (!isAdmin && requestedAuthorityWallet !== creatorWalletAddress) {
+    throw new AppError('Authority wallet must match your connected wallet', 403, 'DAO_AUTHORITY_WALLET_MISMATCH');
+  }
+
+  const governanceProgramId = input.governanceProgramId
+    ? normalizeAddress(input.governanceProgramId, 'governance program id')
+    : SOLANA_PROGRAM_IDS.governanceProgram;
+  const communityMint = normalizeAddress(input.communityMint, 'community mint');
+  const councilMint = input.councilMint ? normalizeAddress(input.councilMint, 'council mint') : undefined;
+  const rpcUrl = input.rpcUrl ?? defaultRpcByNetwork[input.network];
+  const connection = new Connection(rpcUrl, { commitment: env.SOLANA_COMMITMENT as Commitment });
+  const feePayer = new PublicKey(creatorWalletAddress);
+  const instructions: TransactionInstruction[] = [];
+
+  const realmAddress = await withCreateRealm(
+    instructions,
+    new PublicKey(governanceProgramId),
+    input.programVersion,
+    input.name,
+    new PublicKey(requestedAuthorityWallet),
+    new PublicKey(communityMint),
+    feePayer,
+    councilMint ? new PublicKey(councilMint) : undefined,
+    MintMaxVoteWeightSource.FULL_SUPPLY_FRACTION,
+    new BN(1),
+  );
+
+  const transaction = new Transaction().add(...instructions);
+  transaction.feePayer = feePayer;
+  const latestBlockhash = await connection.getLatestBlockhash(env.SOLANA_COMMITMENT as Commitment);
+  transaction.recentBlockhash = latestBlockhash.blockhash;
+  const transactionBase64 = transaction
+    .serialize({
+      requireAllSignatures: false,
+      verifySignatures: false,
+    })
+    .toString('base64');
+
+  return {
+    transactionBase64,
+    realmAddress: realmAddress.toBase58(),
+    authorityWallet: requestedAuthorityWallet,
+    governanceProgramId,
+    rpcUrl,
+    recentBlockhash: latestBlockhash.blockhash,
+    lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+    network: input.network,
+  };
 };
 
 export const listDaos = async ({ page, limit, search }: { page: number; limit: number; search?: string }) => {
@@ -103,15 +227,7 @@ export const getDaoById = async (daoId: string): Promise<DaoDocument> => {
 };
 
 export const updateDao = async (daoId: string, input: UpdateDaoInput, userId: Types.ObjectId): Promise<DaoDocument> => {
-  const dao = await DaoModel.findById(daoId);
-
-  if (!dao) {
-    throw new AppError('DAO not found', 404, 'DAO_NOT_FOUND');
-  }
-
-  if (!dao.createdBy.equals(userId)) {
-    throw new AppError('Forbidden', 403, 'FORBIDDEN');
-  }
+  const dao = await assertCanManageDao(daoId, userId);
 
   if (input.name) {
     dao.name = input.name;
