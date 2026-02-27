@@ -1113,6 +1113,72 @@ p {
   font-weight: 800;
 }
 
+.dao-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.dao-metric-item {
+  border: var(--border);
+  padding: 0.55rem 0.6rem;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.dao-metric-item span {
+  font-size: 0.74rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #666;
+}
+
+.dao-metric-item strong {
+  font-size: 0.9rem;
+  color: var(--black);
+}
+
+.dao-address-grid {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.dao-address-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-top: var(--border);
+  padding-top: 0.45rem;
+}
+
+.dao-address-item span {
+  font-size: 0.78rem;
+  color: #666;
+}
+
+.dao-address-item a {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.82rem;
+  color: var(--black);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--black);
+}
+
+.dao-address-item a:hover {
+  background: var(--bg);
+}
+
+.dao-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.dao-card-actions .secondary-button {
+  text-decoration: none;
+}
+
 .status-chip {
   border: var(--border);
   background: var(--bg);

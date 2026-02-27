@@ -139,6 +139,12 @@ const toFieldErrors = (error: unknown): Record<string, string> => {
 const withInputErrorClass = (baseClass: string, hasError: boolean): string =>
   `${baseClass}${hasError ? ' input-invalid' : ''}`;
 
+const getExplorerAddressUrl = (address: string, network: DaoNetwork): string =>
+  `https://explorer.solana.com/address/${address}${network === 'devnet' ? '?cluster=devnet' : ''}`;
+
+const getRealmsUrl = (network: DaoNetwork): string =>
+  `https://v2.realms.today${network === 'devnet' ? '?cluster=devnet' : ''}`;
+
 const deserializePreparedTransaction = (transactionBase64: string): Transaction | VersionedTransaction => {
   const transactionBytes = base64ToBytes(transactionBase64);
 
@@ -1066,43 +1072,82 @@ export const DashboardDaosPage = (): JSX.Element => {
           {daos.map((dao) => (
             <article key={dao.id} className="data-card">
               <div className="data-card-header">
-                <h3>{dao.name}</h3>
+                <div>
+                  <h3>{dao.name}</h3>
+                  <p className="hint-text">Slug: {dao.slug}</p>
+                </div>
                 <span className="status-chip">{dao.network}</span>
               </div>
-              <dl>
-                <div>
-                  <dt>Slug</dt>
-                  <dd>{dao.slug}</dd>
+              {dao.description ? <p className="hint-text">{dao.description}</p> : null}
+
+              <div className="dao-metric-grid">
+                <div className="dao-metric-item">
+                  <span>Auto execute</span>
+                  <strong>{dao.automationConfig.autoExecuteEnabled ? 'Enabled' : 'Disabled'}</strong>
                 </div>
-                <div>
-                  <dt>Realm</dt>
-                  <dd title={dao.realmAddress}>{shortAddress(dao.realmAddress, 6)}</dd>
+                <div className="dao-metric-item">
+                  <span>Max risk</span>
+                  <strong>{dao.automationConfig.maxRiskScore}</strong>
                 </div>
-                <div>
-                  <dt>Governance Program</dt>
-                  <dd title={dao.governanceProgramId}>{shortAddress(dao.governanceProgramId, 6)}</dd>
+                <div className="dao-metric-item">
+                  <span>Simulation</span>
+                  <strong>{dao.automationConfig.requireSimulation ? 'Required' : 'Optional'}</strong>
                 </div>
-                <div>
-                  <dt>Authority</dt>
-                  <dd title={dao.authorityWallet}>{shortAddress(dao.authorityWallet, 6)}</dd>
+                <div className="dao-metric-item">
+                  <span>Updated</span>
+                  <strong>{formatDateTime(dao.updatedAt)}</strong>
                 </div>
-                <div>
-                  <dt>Auto execute</dt>
-                  <dd>{dao.automationConfig.autoExecuteEnabled ? 'Enabled' : 'Disabled'}</dd>
+              </div>
+
+              <div className="dao-address-grid">
+                <div className="dao-address-item">
+                  <span>Realm</span>
+                  <a
+                    href={getExplorerAddressUrl(dao.realmAddress, dao.network)}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={dao.realmAddress}
+                  >
+                    {shortAddress(dao.realmAddress, 6)}
+                  </a>
                 </div>
-                <div>
-                  <dt>Max risk score</dt>
-                  <dd>{dao.automationConfig.maxRiskScore}</dd>
+                <div className="dao-address-item">
+                  <span>Governance Program</span>
+                  <a
+                    href={getExplorerAddressUrl(dao.governanceProgramId, dao.network)}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={dao.governanceProgramId}
+                  >
+                    {shortAddress(dao.governanceProgramId, 6)}
+                  </a>
                 </div>
-                <div>
-                  <dt>Require simulation</dt>
-                  <dd>{dao.automationConfig.requireSimulation ? 'Yes' : 'No'}</dd>
+                <div className="dao-address-item">
+                  <span>Authority</span>
+                  <a
+                    href={getExplorerAddressUrl(dao.authorityWallet, dao.network)}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={dao.authorityWallet}
+                  >
+                    {shortAddress(dao.authorityWallet, 6)}
+                  </a>
                 </div>
-                <div>
-                  <dt>Updated</dt>
-                  <dd>{formatDateTime(dao.updatedAt)}</dd>
-                </div>
-              </dl>
+              </div>
+
+              <div className="dao-card-actions">
+                <a className="secondary-button" href={getRealmsUrl(dao.network)} target="_blank" rel="noreferrer">
+                  Open in Realms
+                </a>
+                <a
+                  className="secondary-button"
+                  href={getExplorerAddressUrl(dao.realmAddress, dao.network)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  View Realm on Explorer
+                </a>
+              </div>
             </article>
           ))}
         </div>
