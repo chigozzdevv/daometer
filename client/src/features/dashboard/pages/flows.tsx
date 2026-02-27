@@ -286,9 +286,6 @@ export const DashboardFlowsPage = (): JSX.Element => {
         <FlowEditor
           accessToken={session.accessToken}
           flowId={activeFlowId}
-          onFlowSaved={() => {
-            void loadFlows();
-          }}
           onFlowPublished={() => {
             void loadFlows();
           }}

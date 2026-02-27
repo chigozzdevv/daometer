@@ -407,13 +407,12 @@ const clamp = (value: number, min: number, max: number): number => Math.min(Math
 type FlowEditorProps = {
   accessToken: string;
   flowId: string;
-  onFlowSaved: () => void;
   onFlowPublished: (result: PublishFlowResult) => void;
 };
 
 type EditorStep = 'builder' | 'compile' | 'publish';
 
-export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }: FlowEditorProps): JSX.Element => {
+export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorProps): JSX.Element => {
   const autosaveTimerRef = useRef<number | null>(null);
 
   const [activeStep, setActiveStep] = useState<EditorStep>('builder');
@@ -719,7 +718,6 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
 
       setIsDirty(false);
       setLastSavedAt(new Date().toISOString());
-      onFlowSaved();
       return payload;
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Auto-save failed');
@@ -877,7 +875,6 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
           : 'Flow published successfully.',
       );
       onFlowPublished(result);
-      onFlowSaved();
       setCompileResult(result.compilation);
       setLastSavedAt(new Date().toISOString());
     } catch (publishError) {
