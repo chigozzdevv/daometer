@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState } from 'react';
 import { Transaction, VersionedTransaction } from '@solana/web3.js';
 import { useAuth } from '@/app/providers/auth-provider';
 import {
@@ -40,7 +40,6 @@ const resolveGovernanceProgramIdForNetwork = (current: string, network: DaoNetwo
 };
 
 type OnchainFieldErrorKey = 'name' | 'governanceProgramId' | 'authorityWallet' | 'communityMint';
-type ImportFieldErrorKey = 'name' | 'realmAddress' | 'governanceProgramId' | 'authorityWallet';
 type MintFieldErrorKey = 'name' | 'decimals' | 'authorityWallet';
 
 type FieldErrors<TField extends string> = Partial<Record<TField, string>>;
@@ -359,28 +358,14 @@ const governancePresetConfig = (
 export const DashboardDaosPage = (): JSX.Element => {
   const { session } = useAuth();
   const [daos, setDaos] = useState<DaoItem[]>([]);
-  const [activeTab, setActiveTab] = useState<'onchain' | 'import'>('onchain');
   const [isSetupOpen, setIsSetupOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [isImporting, setIsImporting] = useState(false);
   const [isCreatingOnchain, setIsCreatingOnchain] = useState(false);
   const [isCreatingCommunityMint, setIsCreatingCommunityMint] = useState(false);
   const [isCommunityMintModalOpen, setIsCommunityMintModalOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
-  const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const [onchainError, setOnchainError] = useState<string | null>(null);
   const [onchainSuccess, setOnchainSuccess] = useState<string | null>(null);
-
-  const [importName, setImportName] = useState('');
-  const [importNetwork, setImportNetwork] = useState<DaoNetwork>('devnet');
-  const [importDescription, setImportDescription] = useState('');
-  const [importRealmAddress, setImportRealmAddress] = useState('');
-  const [importGovernanceProgramId, setImportGovernanceProgramId] = useState(getDefaultGovernanceProgramId('devnet'));
-  const [importAuthorityWallet, setImportAuthorityWallet] = useState('');
-  const [importCommunityMint, setImportCommunityMint] = useState('');
-  const [importCouncilMint, setImportCouncilMint] = useState('');
-  const [importFieldErrors, setImportFieldErrors] = useState<FieldErrors<ImportFieldErrorKey>>({});
 
   const [onchainName, setOnchainName] = useState('');
   const [onchainNetwork, setOnchainNetwork] = useState<DaoNetwork>('devnet');
@@ -605,7 +590,6 @@ export const DashboardDaosPage = (): JSX.Element => {
           return;
         }
 
-        setImportAuthorityWallet(profile.walletAddress);
         setOnchainAuthorityWallet(profile.walletAddress);
         setMintAuthorityWallet(profile.walletAddress);
       } catch {
@@ -654,96 +638,6 @@ export const DashboardDaosPage = (): JSX.Element => {
       }));
     }
   }, [onchainCouncilMint, onchainGovernanceConfig.voteScope]);
-
-  const handleImportDao = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault();
-    setImportError(null);
-    setImportSuccess(null);
-    setImportFieldErrors({});
-
-    if (!session?.accessToken) {
-      setImportError('You must be authenticated to import a DAO.');
-      return;
-    }
-
-    const nextFieldErrors: FieldErrors<ImportFieldErrorKey> = {};
-
-    if (!importName.trim()) {
-      nextFieldErrors.name = 'Name is required.';
-    }
-
-    if (!importRealmAddress.trim()) {
-      nextFieldErrors.realmAddress = 'Realm address is required.';
-    }
-
-    if (!importGovernanceProgramId.trim()) {
-      nextFieldErrors.governanceProgramId = 'Governance program ID is required.';
-    }
-
-    if (!importAuthorityWallet.trim()) {
-      nextFieldErrors.authorityWallet = 'Authority wallet is required.';
-    }
-
-    if (Object.keys(nextFieldErrors).length > 0) {
-      setImportFieldErrors(nextFieldErrors);
-      setImportError('Please fill all required fields.');
-      return;
-    }
-
-    setIsImporting(true);
-
-    try {
-      const created = await createDao(
-        {
-          name: importName.trim(),
-          description: importDescription.trim() || undefined,
-          network: importNetwork,
-          realmAddress: importRealmAddress.trim(),
-          governanceProgramId: importGovernanceProgramId.trim(),
-          authorityWallet: importAuthorityWallet.trim(),
-          communityMint: importCommunityMint.trim() || undefined,
-          councilMint: importCouncilMint.trim() || undefined,
-        },
-        session.accessToken,
-      );
-
-      setImportSuccess(`DAO "${created.name}" imported.`);
-      setImportName('');
-      setImportDescription('');
-      setImportRealmAddress('');
-      setImportCommunityMint('');
-      setImportCouncilMint('');
-      setImportFieldErrors({});
-      setDaos((prev) => [created, ...prev]);
-    } catch (createDaoError) {
-      const fieldErrors = toFieldErrors(createDaoError);
-      const validationFieldErrors: FieldErrors<ImportFieldErrorKey> = {};
-
-      if (fieldErrors.name) {
-        validationFieldErrors.name = fieldErrors.name;
-      }
-
-      if (fieldErrors.realmAddress) {
-        validationFieldErrors.realmAddress = fieldErrors.realmAddress;
-      }
-
-      if (fieldErrors.governanceProgramId) {
-        validationFieldErrors.governanceProgramId = fieldErrors.governanceProgramId;
-      }
-
-      if (fieldErrors.authorityWallet) {
-        validationFieldErrors.authorityWallet = fieldErrors.authorityWallet;
-      }
-
-      if (Object.keys(validationFieldErrors).length > 0) {
-        setImportFieldErrors(validationFieldErrors);
-      }
-
-      setImportError(createDaoError instanceof Error ? createDaoError.message : 'Unable to import DAO');
-    } finally {
-      setIsImporting(false);
-    }
-  };
 
   const handleCreateOnchainDao = async (): Promise<void> => {
     setOnchainError(null);
@@ -1009,7 +903,6 @@ export const DashboardDaosPage = (): JSX.Element => {
       setOnchainAuthorityWallet(prepared.authorityWallet);
       setMintAuthorityWallet(prepared.authorityWallet);
       setOnchainCommunityMint(prepared.mintAddress);
-      setImportCommunityMint(prepared.mintAddress);
       setMintFieldErrors({});
       setOnchainSuccess(
         `Community mint created (${prepared.symbol}) ${prepared.mintAddress.slice(0, 8)}... Tx: ${signature.slice(0, 12)}...`,
@@ -1058,52 +951,31 @@ export const DashboardDaosPage = (): JSX.Element => {
       <article className="data-card">
         <div className="data-card-header">
           <h3>DAO Setup</h3>
-          {isSetupOpen ? <span className="status-chip">{activeTab === 'onchain' ? 'wallet-sign' : 'register'}</span> : null}
+          {isSetupOpen ? <span className="status-chip">wallet-sign</span> : null}
         </div>
         {!isSetupOpen ? (
           <div className="auth-form">
-            <p className="hint-text">Start by opening DAO setup, then choose on-chain creation or importing an existing realm.</p>
+            <p className="hint-text">Start by opening DAO setup and create end-to-end in one flow.</p>
             <button
               type="button"
               className="primary-button"
               onClick={() => {
                 setIsSetupOpen(true);
-                setActiveTab('onchain');
               }}
             >
               Create DAO
             </button>
           </div>
         ) : (
-          <>
-            <div className="auth-mode-switch" role="tablist" aria-label="DAO setup mode">
-              <button
-                type="button"
-                className={`tab-button${activeTab === 'onchain' ? ' tab-button-active' : ''}`}
-                onClick={() => setActiveTab('onchain')}
-              >
-                Create On-chain Realm
-              </button>
-              <button
-                type="button"
-                className={`tab-button${activeTab === 'import' ? ' tab-button-active' : ''}`}
-                onClick={() => setActiveTab('import')}
-              >
-                Import Existing Realm
-              </button>
-            </div>
-
+          <form className="auth-form" onSubmit={(event) => event.preventDefault()}>
             <button
               type="button"
               className="secondary-button"
               onClick={() => setIsSetupOpen(false)}
-              disabled={isImporting || isCreatingOnchain || isCreatingCommunityMint}
+              disabled={isCreatingOnchain || isCreatingCommunityMint}
             >
               Close Setup
             </button>
-
-            {activeTab === 'onchain' ? (
-              <form className="auth-form" onSubmit={(event) => event.preventDefault()}>
             <label className="input-label">
               Name
               <input
@@ -1186,7 +1058,7 @@ export const DashboardDaosPage = (): JSX.Element => {
                 <button
                   type="button"
                   className="secondary-button"
-                  disabled={isImporting || isCreatingOnchain || isCreatingCommunityMint}
+                  disabled={isCreatingOnchain || isCreatingCommunityMint}
                   onClick={() => {
                     openCommunityMintModal();
                   }}
@@ -1350,121 +1222,14 @@ export const DashboardDaosPage = (): JSX.Element => {
             <button
               type="button"
               className="primary-button"
-              disabled={isImporting || isCreatingOnchain || isCreatingCommunityMint}
+              disabled={isCreatingOnchain || isCreatingCommunityMint}
               onClick={() => {
                 void handleCreateOnchainDao();
               }}
             >
               {isCreatingOnchain ? 'Creating DAO...' : 'Create DAO'}
             </button>
-              </form>
-            ) : (
-              <form className="auth-form" onSubmit={handleImportDao}>
-            <label className="input-label">
-              Name
-              <input
-                className={withInputErrorClass('text-input', Boolean(importFieldErrors.name))}
-                value={importName}
-                onChange={(event) => {
-                  setImportName(event.target.value);
-                  setImportFieldErrors((current) => ({ ...current, name: undefined }));
-                }}
-                minLength={2}
-                aria-invalid={Boolean(importFieldErrors.name)}
-                required
-              />
-              {importFieldErrors.name ? <span className="field-error">{importFieldErrors.name}</span> : null}
-            </label>
-
-            <label className="input-label">
-              Network
-              <select
-                className="select-input"
-                value={importNetwork}
-                onChange={(event) => {
-                  const nextNetwork = event.target.value as DaoNetwork;
-                  setImportNetwork(nextNetwork);
-                  setImportGovernanceProgramId((current) => resolveGovernanceProgramIdForNetwork(current, nextNetwork));
-                }}
-              >
-                <option value="devnet">devnet</option>
-                <option value="mainnet-beta">mainnet-beta</option>
-              </select>
-            </label>
-
-            <label className="input-label">
-              Realm Address
-              <input
-                className={withInputErrorClass('text-input', Boolean(importFieldErrors.realmAddress))}
-                value={importRealmAddress}
-                onChange={(event) => {
-                  setImportRealmAddress(event.target.value);
-                  setImportFieldErrors((current) => ({ ...current, realmAddress: undefined }));
-                }}
-                aria-invalid={Boolean(importFieldErrors.realmAddress)}
-                required
-              />
-              {importFieldErrors.realmAddress ? <span className="field-error">{importFieldErrors.realmAddress}</span> : null}
-            </label>
-
-            <label className="input-label">
-              Governance Program ID
-              <input
-                className={withInputErrorClass('text-input', Boolean(importFieldErrors.governanceProgramId))}
-                value={importGovernanceProgramId}
-                onChange={(event) => {
-                  setImportGovernanceProgramId(event.target.value);
-                  setImportFieldErrors((current) => ({ ...current, governanceProgramId: undefined }));
-                }}
-                aria-invalid={Boolean(importFieldErrors.governanceProgramId)}
-                required
-              />
-              {importFieldErrors.governanceProgramId ? (
-                <span className="field-error">{importFieldErrors.governanceProgramId}</span>
-              ) : null}
-            </label>
-
-            <label className="input-label">
-              Authority Wallet
-              <input
-                className={withInputErrorClass('text-input', Boolean(importFieldErrors.authorityWallet))}
-                value={importAuthorityWallet}
-                onChange={(event) => {
-                  setImportAuthorityWallet(event.target.value);
-                  setImportFieldErrors((current) => ({ ...current, authorityWallet: undefined }));
-                }}
-                aria-invalid={Boolean(importFieldErrors.authorityWallet)}
-                required
-              />
-              {importFieldErrors.authorityWallet ? (
-                <span className="field-error">{importFieldErrors.authorityWallet}</span>
-              ) : null}
-            </label>
-
-            <label className="input-label">
-              Community Mint (optional)
-              <input className="text-input" value={importCommunityMint} onChange={(event) => setImportCommunityMint(event.target.value)} />
-            </label>
-
-            <label className="input-label">
-              Council Mint (optional)
-              <input className="text-input" value={importCouncilMint} onChange={(event) => setImportCouncilMint(event.target.value)} />
-            </label>
-
-            <label className="input-label">
-              Description (optional)
-              <textarea className="text-input" value={importDescription} onChange={(event) => setImportDescription(event.target.value)} />
-            </label>
-
-            {importError ? <p className="error-text">{importError}</p> : null}
-            {importSuccess ? <p className="success-text">{importSuccess}</p> : null}
-
-            <button type="submit" className="primary-button" disabled={isImporting || isCreatingOnchain}>
-              {isImporting ? 'Importing...' : 'Import Existing Realm'}
-            </button>
-              </form>
-            )}
-          </>
+          </form>
         )}
       </article>
 
