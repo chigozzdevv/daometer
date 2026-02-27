@@ -1,12 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useAuth } from '@/app/providers/auth-provider';
 import {
-  createProposal,
-  createProposalOnchain,
-  getDaoGovernances,
   getDaoProposals,
   getDaos,
-  type DaoGovernanceItem,
   type DaoItem,
   type ProposalItem,
 } from '@/features/dashboard/api/api';
@@ -14,9 +9,6 @@ import { DaoSelect } from '@/features/dashboard/components/dao-select';
 import { DashboardShell } from '@/features/dashboard/components/shell';
 import { ErrorState, LoadingState } from '@/features/dashboard/components/state';
 import { formatDateTime } from '@/features/dashboard/lib/format';
-import { ApiRequestError } from '@/shared/lib/api-client';
-
-const SYSTEM_PROGRAM_ID = '11111111111111111111111111111111';
 
 const getRealmDetailUrl = (realmAddress: string, network: 'mainnet-beta' | 'devnet'): string =>
   `https://app.realms.today/dao/${realmAddress}${network === 'devnet' ? '?cluster=devnet' : ''}`;
@@ -49,7 +41,6 @@ const approvalChip = (required: boolean, approved: boolean | null): JSX.Element 
 };
 
 export const DashboardProposalsPage = (): JSX.Element => {
-  const { session } = useAuth();
   const [daos, setDaos] = useState<DaoItem[]>([]);
   const [selectedDaoId, setSelectedDaoId] = useState<string | null>(null);
   const [proposals, setProposals] = useState<ProposalItem[]>([]);
@@ -59,79 +50,10 @@ export const DashboardProposalsPage = (): JSX.Element => {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [createSuccess, setCreateSuccess] = useState<string | null>(null);
-  const [createTitle, setCreateTitle] = useState('');
-  const [createDescription, setCreateDescription] = useState('');
-  const [createVoteScope, setCreateVoteScope] = useState<'community' | 'council'>('community');
-  const [createVotingHours, setCreateVotingHours] = useState('72');
-  const [createOnchainNow, setCreateOnchainNow] = useState(true);
-  const [createGovernanceAddress, setCreateGovernanceAddress] = useState('');
-  const [createGoverningTokenMint, setCreateGoverningTokenMint] = useState('');
-  const [governanceOptions, setGovernanceOptions] = useState<DaoGovernanceItem[]>([]);
-  const [isLoadingGovernances, setIsLoadingGovernances] = useState(false);
-  const [governanceError, setGovernanceError] = useState<string | null>(null);
-
   const selectedDao = useMemo(
     () => daos.find((dao) => dao.id === selectedDaoId) ?? null,
     [daos, selectedDaoId],
   );
-
-  useEffect(() => {
-    if (!selectedDao) {
-      return;
-    }
-
-    setCreateGoverningTokenMint((current) => current || selectedDao.communityMint || '');
-  }, [selectedDao]);
-
-  useEffect(() => {
-    if (!selectedDaoId) {
-      setGovernanceOptions([]);
-      setCreateGovernanceAddress('');
-      setGovernanceError(null);
-      setIsLoadingGovernances(false);
-      return;
-    }
-
-    let isMounted = true;
-
-    const loadGovernances = async (): Promise<void> => {
-      setIsLoadingGovernances(true);
-      setGovernanceError(null);
-
-      try {
-        const response = await getDaoGovernances(selectedDaoId);
-        if (!isMounted) return;
-        setGovernanceOptions(response.items);
-        setCreateGovernanceAddress((current) => {
-          if (!response.items.length) {
-            return '';
-          }
-
-          if (current && response.items.some((item) => item.address === current)) {
-            return current;
-          }
-
-          return response.items[0]?.address ?? '';
-        });
-      } catch (loadError) {
-        if (!isMounted) return;
-        setGovernanceOptions([]);
-        setCreateGovernanceAddress('');
-        setGovernanceError(loadError instanceof Error ? loadError.message : 'Unable to load governance accounts');
-      } finally {
-        if (isMounted) setIsLoadingGovernances(false);
-      }
-    };
-
-    void loadGovernances();
-    return () => {
-      isMounted = false;
-    };
-  }, [selectedDaoId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -207,134 +129,14 @@ export const DashboardProposalsPage = (): JSX.Element => {
     };
   }, [selectedDaoId, autoRefresh]);
 
-  const handleCreateProposal = async (): Promise<void> => {
-    setCreateError(null);
-    setCreateSuccess(null);
-
-    if (!session?.accessToken) {
-      setCreateError('You must be authenticated to create a proposal.');
-      return;
-    }
-
-    if (!selectedDaoId) {
-      setCreateError('Select a DAO first.');
-      return;
-    }
-
-    if (createTitle.trim().length < 3) {
-      setCreateError('Title must be at least 3 characters.');
-      return;
-    }
-
-    const votingHours = Number(createVotingHours.trim());
-
-    if (!Number.isFinite(votingHours) || votingHours <= 0 || votingHours > 720) {
-      setCreateError('Voting duration must be between 1 and 720 hours.');
-      return;
-    }
-
-    setIsCreating(true);
-
-    try {
-      const votingEndsAt = new Date(Date.now() + votingHours * 60 * 60 * 1000).toISOString();
-      const created = await createProposal(
-        {
-          daoId: selectedDaoId,
-          title: createTitle.trim(),
-          description: createDescription.trim() || undefined,
-          voteScope: createVoteScope,
-          state: 'draft',
-          holdUpSeconds: 0,
-          votingEndsAt,
-          instructions: [
-            {
-              index: 0,
-              kind: 'custom',
-              label: 'Signal / discussion',
-              programId: SYSTEM_PROGRAM_ID,
-              accounts: [],
-              riskScore: 0,
-            },
-          ],
-        },
-        session.accessToken,
-      );
-
-      let finalProposal = created;
-
-      if (createOnchainNow) {
-        if (!selectedDao) {
-          throw new Error('Selected DAO context missing for on-chain creation.');
-        }
-
-        if (!createGovernanceAddress.trim()) {
-          throw new Error('Select a governance account for on-chain creation.');
-        }
-
-        if (!createGoverningTokenMint.trim()) {
-          throw new Error('Governing token mint is required for on-chain creation.');
-        }
-
-        const onchain = await createProposalOnchain(
-          created.id,
-          {
-            governanceProgramId: selectedDao.governanceProgramId,
-            programVersion: 3,
-            realmAddress: selectedDao.realmAddress,
-            governanceAddress: createGovernanceAddress.trim(),
-            governingTokenMint: createGoverningTokenMint.trim(),
-            signOff: true,
-            useDenyOption: true,
-            requireSimulation: true,
-          },
-          session.accessToken,
-        );
-
-        finalProposal = onchain.proposal;
-      }
-
-      setProposals((current) => [finalProposal, ...current]);
-      setCreateSuccess(
-        createOnchainNow
-          ? `Proposal "${finalProposal.title}" created on-chain and synced.`
-          : `Draft proposal "${finalProposal.title}" created.`,
-      );
-      setCreateTitle('');
-      setCreateDescription('');
-      setCreateVoteScope('community');
-      setCreateVotingHours('72');
-      setCreateOnchainNow(true);
-      setIsCreateModalOpen(false);
-    } catch (createProposalError) {
-      if (createProposalError instanceof ApiRequestError) {
-        setCreateError(createProposalError.message);
-      } else {
-        setCreateError(createProposalError instanceof Error ? createProposalError.message : 'Unable to create proposal');
-      }
-    } finally {
-      setIsCreating(false);
-    }
-  };
-
   const isLoading = isLoadingDaos || isLoadingProposals;
-  const selectedGovernance = governanceOptions.find((item) => item.address === createGovernanceAddress) ?? null;
 
   return (
-    <DashboardShell title="Proposals" description="Real proposal states, risk, and execution metadata by DAO.">
+    <DashboardShell title="Proposals" description="Monitor proposal states, risk, voting timeline, and execution status.">
       <DaoSelect daos={daos} selectedDaoId={selectedDaoId} onSelect={setSelectedDaoId} />
 
-      {selectedDao && !isLoading && !error && proposals.length > 0 ? (
+      {selectedDao && !isLoading && !error ? (
         <div className="dao-card-actions">
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => {
-              setCreateError(null);
-              setIsCreateModalOpen(true);
-            }}
-          >
-            Create Proposal
-          </button>
           <a className="secondary-button" href={getRealmDetailUrl(selectedDao.realmAddress, selectedDao.network)} target="_blank" rel="noreferrer">
             Open DAO in Realms
           </a>
@@ -369,8 +171,6 @@ export const DashboardProposalsPage = (): JSX.Element => {
         </div>
       ) : null}
 
-      {createSuccess ? <p className="success-text">{createSuccess}</p> : null}
-      {createError ? <p className="error-text">{createError}</p> : null}
       {!isLoading && !error ? (
         <p className="hint-text">
           {lastRefreshedAt ? `Last refreshed: ${formatDateTime(lastRefreshedAt)}` : 'No refresh yet'}
@@ -389,17 +189,12 @@ export const DashboardProposalsPage = (): JSX.Element => {
       {!isLoading && !error && selectedDaoId && proposals.length === 0 ? (
         <article className="data-card">
           <h3>No Proposals Yet</h3>
-          <p>Create your first proposal here, or create/vote proposals directly in Realms and then sync/import into this app.</p>
-          {selectedDao ? (
-            <div className="dao-card-actions">
-              <button type="button" className="primary-button" onClick={() => setIsCreateModalOpen(true)}>
-                Create Proposal
-              </button>
-              <a className="secondary-button" href={getRealmDetailUrl(selectedDao.realmAddress, selectedDao.network)} target="_blank" rel="noreferrer">
-                Open DAO in Realms
-              </a>
-            </div>
-          ) : null}
+          <p>Create and publish your proposal from Flows. This page is for tracking proposals after publish.</p>
+          <div className="dao-card-actions">
+            <a className="secondary-button" href="/dashboard/flows">
+              Open Flows
+            </a>
+          </div>
         </article>
       ) : null}
 
@@ -446,168 +241,6 @@ export const DashboardProposalsPage = (): JSX.Element => {
               ))}
             </tbody>
           </table>
-        </div>
-      ) : null}
-
-      {isCreateModalOpen ? (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Create Proposal">
-          <form
-            className="modal-card auth-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void handleCreateProposal();
-            }}
-          >
-            <h3>Create Proposal</h3>
-            <p>Create a proposal and optionally push it on-chain immediately for your Realm.</p>
-
-            <label className="input-label">
-              Title
-              <input
-                className="text-input"
-                value={createTitle}
-                onChange={(event) => setCreateTitle(event.target.value)}
-                minLength={3}
-                maxLength={200}
-                required
-              />
-            </label>
-
-            <label className="input-label">
-              Description (optional)
-              <textarea
-                className="text-input"
-                value={createDescription}
-                onChange={(event) => setCreateDescription(event.target.value)}
-                maxLength={5000}
-              />
-            </label>
-
-            <label className="input-label">
-              Vote scope
-              <select
-                className="select-input"
-                value={createVoteScope}
-                onChange={(event) => setCreateVoteScope(event.target.value as 'community' | 'council')}
-              >
-                <option value="community">community</option>
-                <option value="council">council</option>
-              </select>
-            </label>
-
-            <label className="input-label">
-              Voting duration (hours)
-              <input
-                className="text-input"
-                type="number"
-                min={1}
-                max={720}
-                value={createVotingHours}
-                onChange={(event) => setCreateVotingHours(event.target.value)}
-                required
-              />
-            </label>
-
-            <label className="checkbox-field">
-              <input
-                type="checkbox"
-                checked={createOnchainNow}
-                onChange={(event) => setCreateOnchainNow(event.target.checked)}
-              />
-              Create on-chain now
-            </label>
-
-            {createOnchainNow ? (
-              <>
-                <label className="input-label">
-                  Governance account
-                  <select
-                    className="select-input"
-                    value={createGovernanceAddress}
-                    onChange={(event) => setCreateGovernanceAddress(event.target.value)}
-                    required
-                    disabled={isLoadingGovernances || governanceOptions.length === 0}
-                  >
-                    {governanceOptions.length === 0 ? (
-                      <option value="">
-                        {isLoadingGovernances ? 'Loading governance accounts...' : 'No governance accounts found'}
-                      </option>
-                    ) : null}
-                    {governanceOptions.map((item) => (
-                      <option key={item.address} value={item.address}>
-                        {item.address}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <div className="dao-card-actions">
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={async () => {
-                      if (!selectedDaoId) return;
-                      setGovernanceError(null);
-                      setIsLoadingGovernances(true);
-                      try {
-                        const response = await getDaoGovernances(selectedDaoId);
-                        setGovernanceOptions(response.items);
-                        setCreateGovernanceAddress((current) => {
-                          if (!response.items.length) return '';
-                          if (current && response.items.some((item) => item.address === current)) return current;
-                          return response.items[0]?.address ?? '';
-                        });
-                      } catch (refreshError) {
-                        setGovernanceOptions([]);
-                        setCreateGovernanceAddress('');
-                        setGovernanceError(
-                          refreshError instanceof Error ? refreshError.message : 'Unable to refresh governance accounts',
-                        );
-                      } finally {
-                        setIsLoadingGovernances(false);
-                      }
-                    }}
-                  >
-                    {isLoadingGovernances ? 'Refreshing...' : 'Refresh governance list'}
-                  </button>
-                </div>
-
-                {selectedGovernance?.governedAccount ? (
-                  <p className="hint-text">
-                    Governed account: <code>{selectedGovernance.governedAccount}</code>
-                  </p>
-                ) : null}
-                {governanceError ? <p className="error-text">{governanceError}</p> : null}
-                {!isLoadingGovernances && governanceOptions.length === 0 && selectedDao ? (
-                  <p className="hint-text">
-                    Create a governance in Realms first, then return and refresh.{' '}
-                    <a href={getRealmDetailUrl(selectedDao.realmAddress, selectedDao.network)} target="_blank" rel="noreferrer">
-                      Open in Realms
-                    </a>
-                  </p>
-                ) : null}
-
-                <label className="input-label">
-                  Governing token mint
-                  <input
-                    className="text-input"
-                    value={createGoverningTokenMint}
-                    onChange={(event) => setCreateGoverningTokenMint(event.target.value)}
-                    required
-                  />
-                </label>
-              </>
-            ) : null}
-
-            <div className="modal-actions">
-              <button type="button" className="secondary-button" disabled={isCreating} onClick={() => setIsCreateModalOpen(false)}>
-                Cancel
-              </button>
-              <button type="submit" className="primary-button" disabled={isCreating}>
-                {isCreating ? 'Creating...' : createOnchainNow ? 'Create On-chain Proposal' : 'Create Draft'}
-              </button>
-            </div>
-          </form>
         </div>
       ) : null}
     </DashboardShell>
