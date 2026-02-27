@@ -168,7 +168,6 @@ export const DashboardDaosPage = (): JSX.Element => {
   const [onchainCommunityMint, setOnchainCommunityMint] = useState('');
   const [onchainCouncilMint, setOnchainCouncilMint] = useState('');
   const [onchainFieldErrors, setOnchainFieldErrors] = useState<FieldErrors<OnchainFieldErrorKey>>({});
-  const [onchainCreateGovernanceNow, setOnchainCreateGovernanceNow] = useState(true);
   const [onchainGovernanceConfig, setOnchainGovernanceConfig] = useState<GovernanceConfigDraft>(
     governancePresetConfig('balanced', 'community'),
   );
@@ -529,61 +528,59 @@ export const DashboardDaosPage = (): JSX.Element => {
       let finalDao = createdDao;
       let governanceResultSummary = '';
 
-      if (onchainCreateGovernanceNow) {
-        try {
-          const governanceScope =
-            onchainGovernanceConfig.voteScope === 'council' && !onchainCouncilMint.trim()
-              ? 'community'
-              : onchainGovernanceConfig.voteScope;
-          const governancePrepared = await prepareDaoGovernanceCreate(
-            createdDao.id,
-            {
-              voteScope: governanceScope,
-              createAuthorityWallet: connectedWallet,
-              governanceConfig: {
-                communityYesVoteThresholdPercent: onchainGovernanceConfig.communityYesVoteThresholdPercent,
-                councilYesVoteThresholdPercent: onchainGovernanceConfig.councilYesVoteThresholdPercent,
-                councilVetoVoteThresholdPercent: onchainGovernanceConfig.councilVetoVoteThresholdPercent,
-                baseVotingTimeHours: onchainGovernanceConfig.baseVotingTimeHours,
-                instructionHoldUpTimeHours: onchainGovernanceConfig.instructionHoldUpTimeHours,
-                voteTipping: onchainGovernanceConfig.voteTipping,
-                councilVoteTipping: onchainGovernanceConfig.councilVoteTipping,
-              },
-              programVersion: 3,
+      try {
+        const governanceScope =
+          onchainGovernanceConfig.voteScope === 'council' && !onchainCouncilMint.trim()
+            ? 'community'
+            : onchainGovernanceConfig.voteScope;
+        const governancePrepared = await prepareDaoGovernanceCreate(
+          createdDao.id,
+          {
+            voteScope: governanceScope,
+            createAuthorityWallet: connectedWallet,
+            governanceConfig: {
+              communityYesVoteThresholdPercent: onchainGovernanceConfig.communityYesVoteThresholdPercent,
+              councilYesVoteThresholdPercent: onchainGovernanceConfig.councilYesVoteThresholdPercent,
+              councilVetoVoteThresholdPercent: onchainGovernanceConfig.councilVetoVoteThresholdPercent,
+              baseVotingTimeHours: onchainGovernanceConfig.baseVotingTimeHours,
+              instructionHoldUpTimeHours: onchainGovernanceConfig.instructionHoldUpTimeHours,
+              voteTipping: onchainGovernanceConfig.voteTipping,
+              councilVoteTipping: onchainGovernanceConfig.councilVoteTipping,
             },
-            session.accessToken,
-          );
+            programVersion: 3,
+          },
+          session.accessToken,
+        );
 
-          if (connectedWallet !== governancePrepared.authorityWallet) {
-            throw new Error('Connected wallet must match DAO authority wallet for governance creation.');
-          }
-
-          const governanceSignature = await sendPreparedTransaction(
-            provider,
-            governancePrepared.transactionMessage,
-            governancePrepared.transactionBase58,
-            governancePrepared.transactionBase64,
-          );
-
-          finalDao = await updateDao(
-            createdDao.id,
-            {
-              defaultGovernanceAddress: governancePrepared.governanceAddress,
-            },
-            session.accessToken,
-          );
-
-          governanceResultSummary = ` Governance created (${governancePrepared.governanceAddress.slice(0, 8)}...) tx ${governanceSignature.slice(0, 12)}...`;
-        } catch (governanceError) {
-          setOnchainSuccess(
-            `Realm + DAO created, but governance creation failed. You can create governance from the DAO card.`,
-          );
-          setOnchainError(
-            governanceError instanceof Error ? governanceError.message : 'Governance creation step failed',
-          );
-          setDaos((prev) => [createdDao, ...prev.filter((item) => item.id !== createdDao.id)]);
-          return;
+        if (connectedWallet !== governancePrepared.authorityWallet) {
+          throw new Error('Connected wallet must match DAO authority wallet for governance creation.');
         }
+
+        const governanceSignature = await sendPreparedTransaction(
+          provider,
+          governancePrepared.transactionMessage,
+          governancePrepared.transactionBase58,
+          governancePrepared.transactionBase64,
+        );
+
+        finalDao = await updateDao(
+          createdDao.id,
+          {
+            defaultGovernanceAddress: governancePrepared.governanceAddress,
+          },
+          session.accessToken,
+        );
+
+        governanceResultSummary = ` Governance created (${governancePrepared.governanceAddress.slice(0, 8)}...) tx ${governanceSignature.slice(0, 12)}...`;
+      } catch (governanceError) {
+        setOnchainSuccess(
+          `Realm + DAO created, but governance creation failed. You can create governance from the DAO card.`,
+        );
+        setOnchainError(
+          governanceError instanceof Error ? governanceError.message : 'Governance creation step failed',
+        );
+        setDaos((prev) => [createdDao, ...prev.filter((item) => item.id !== createdDao.id)]);
+        return;
       }
 
       setDaos((prev) => [finalDao, ...prev.filter((item) => item.id !== finalDao.id)]);
@@ -872,17 +869,7 @@ export const DashboardDaosPage = (): JSX.Element => {
               <textarea className="text-input" value={onchainDescription} onChange={(event) => setOnchainDescription(event.target.value)} />
             </label>
 
-            <label className="checkbox-field">
-              <input
-                type="checkbox"
-                checked={onchainCreateGovernanceNow}
-                onChange={(event) => setOnchainCreateGovernanceNow(event.target.checked)}
-              />
-              Create governance account + native treasury after realm creation
-            </label>
-
-            {onchainCreateGovernanceNow ? (
-              <div className="dao-governance-config-form">
+            <div className="dao-governance-config-form">
                 <label className="input-label">
                   Preset
                   <select
@@ -1008,7 +995,6 @@ export const DashboardDaosPage = (): JSX.Element => {
                   </select>
                 </label>
               </div>
-            ) : null}
 
             {onchainError ? <p className="error-text">{onchainError}</p> : null}
             {onchainSuccess ? <p className="success-text">{onchainSuccess}</p> : null}
