@@ -128,6 +128,35 @@ export type ProposalItem = {
   updatedAt: string;
 };
 
+export type CreateProposalInput = {
+  daoId: string;
+  title: string;
+  description?: string;
+  voteScope?: 'community' | 'council';
+  state?: 'draft' | 'voting';
+  holdUpSeconds?: number;
+  votingEndsAt: string;
+  instructions: Array<{
+    index: number;
+    kind: 'transfer' | 'config' | 'program-upgrade' | 'stream' | 'custom';
+    label: string;
+    programId: string;
+    accounts: string[];
+    accountMetas?: Array<{
+      pubkey: string;
+      isSigner: boolean;
+      isWritable: boolean;
+    }>;
+    dataBase64?: string;
+    riskScore: number;
+  }>;
+  automation?: {
+    autoExecute?: boolean;
+    executeAfterHoldUp?: boolean;
+    maxRiskScore?: number;
+  };
+};
+
 export type WorkflowItem = {
   id: string;
   daoId: string;
@@ -443,6 +472,16 @@ export const getDaoProposals = async (daoId: string, options: ProposalListOption
       state: options.state,
     })}`,
   );
+
+export const createProposal = async (
+  input: CreateProposalInput,
+  accessToken: string,
+): Promise<ProposalItem> =>
+  apiRequest<ProposalItem>('/proposals', {
+    method: 'POST',
+    body: input as unknown as Record<string, unknown>,
+    accessToken,
+  });
 
 export const getWorkflows = async (
   daoId: string,
