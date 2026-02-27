@@ -376,6 +376,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
     [governanceOptions, publishGovernanceAddress],
   );
   const getNodeWidth = (nodeId: string): number => nodeWidths[nodeId] ?? defaultNodeWidth;
+  const saveStateLabel = isAutoSaving ? 'Auto-saving...' : isDirty ? 'Unsaved changes' : 'Saved';
 
   const orderingPreview = useMemo(() => {
     try {
@@ -420,6 +421,22 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
     [graphEdges, graphNodeMap, nodeWidths],
   );
 
+  const canvasSize = useMemo(() => {
+    const maxRight = graphNodes.reduce((currentMax, node) => {
+      const nodeWidth = nodeWidths[node.id] ?? defaultNodeWidth;
+      return Math.max(currentMax, node.x + nodeWidth);
+    }, 0);
+    const maxBottom = graphNodes.reduce(
+      (currentMax, node) => Math.max(currentMax, node.y + canvasNodeHeight),
+      0,
+    );
+
+    return {
+      width: Math.max(1180, maxRight + 80),
+      height: Math.max(760, maxBottom + 80),
+    };
+  }, [graphNodes, nodeWidths]);
+
   const markDirty = (): void => {
     if (!isHydrating) {
       setIsDirty(true);
@@ -450,7 +467,12 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
       setGraphNodes(normalizedGraph.nodes);
       setGraphEdges(normalizedGraph.edges);
       setNodeWidths(
-        Object.fromEntries(normalizedGraph.nodes.map((node) => [node.id, defaultNodeWidth])),
+        Object.fromEntries(
+          normalizedGraph.nodes.map((node) => {
+            const matchingBlock = loadedBlocks.find((block) => getString(block.id) === node.id);
+            return [node.id, clamp(getNumber(matchingBlock?.uiWidth, defaultNodeWidth), minNodeWidth, maxNodeWidth)];
+          }),
+        ),
       );
       setActiveStep('builder');
       setPendingLinkSourceId(null);
@@ -714,7 +736,10 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
 
     const normalizedGraph = normalizeGraphForBlocks(blocks, graphNodes, graphEdges);
     const baseBlocks = requireAcyclic ? topologicalSortBlocks(blocks, normalizedGraph.edges) : blocks;
-    const normalizedBlocks = normalizeBlocksForApi(baseBlocks);
+    const normalizedBlocks = normalizeBlocksForApi(baseBlocks).map((block) => ({
+      ...block,
+      uiWidth: getNodeWidth(getString(block.id)),
+    }));
 
     return {
       blocks: normalizedBlocks,
@@ -973,11 +998,6 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
     return block;
   };
 
-  const applyDaoDefaultsToAllBlocks = (): void => {
-    setBlocks((current) => current.map((block) => applyDaoDefaultsToBlock(block)));
-    markDirty();
-  };
-
   const addBlock = (type: SupportedBlockType): void => {
     const nextBlock = applyDaoDefaultsToBlock(defaultBlockForType(type));
     const nextBlockId = getString(nextBlock.id);
@@ -1042,6 +1062,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
           ...next,
           id: blockId,
           label: getString(block.label, getString(next.label)),
+          uiWidth: getNumber(block.uiWidth, getNodeWidth(blockId)),
         };
       }),
     );
@@ -1292,198 +1313,179 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
         <div className="flow-stepper">
           <button
             type="button"
-            className={`flow-stepper-item ${activeStep === 'builder' ? 'flow-stepper-item-active' : ''}`}
-            onClick={() => setActiveStep('builder')}
-          >
-            1. Builder
-          </button>
-          <button
-            type="button"
             className={`flow-stepper-item ${activeStep === 'compile' ? 'flow-stepper-item-active' : ''}`}
             onClick={() => setActiveStep('compile')}
           >
-            2. Compile
+            1. Compile
           </button>
           <button
             type="button"
             className={`flow-stepper-item ${activeStep === 'publish' ? 'flow-stepper-item-active' : ''}`}
             onClick={() => setActiveStep('publish')}
           >
-            3. Publish
+            2. Publish
           </button>
         </div>
       </article>
 
       {activeStep === 'builder' ? (
         <article className="flow-step-card">
-        <header className="flow-step-head">
-          <span className="flow-step-index">Builder</span>
-          <div>
-            <h2>{flowName}</h2>
-            <p>{flowDescription || 'No description'}</p>
+          <header className="flow-step-head">
+            <span className="flow-step-index">Builder</span>
+            <div>
+              <h2>{flowName}</h2>
+              <p>{flowDescription || 'No description'}</p>
+            </div>
+          </header>
+
+          <div className="flow-builder-status-row">
+            <span className="hint-text">
+              {lastSavedAt ? `${saveStateLabel} • ${formatDateTime(lastSavedAt)}` : `${saveStateLabel} • Not saved yet`}
+            </span>
           </div>
-        </header>
 
-        <div className="flow-builder-status-row">
-          <span className="hint-text">{isAutoSaving ? 'Auto-saving...' : isDirty ? 'Unsaved changes' : 'Saved'}</span>
-          <span className="hint-text">{lastSavedAt ? `Last saved: ${formatDateTime(lastSavedAt)}` : 'Not saved yet'}</span>
-          <span className="hint-text">Drag from empty block area. Resize from bottom-right corner.</span>
-        </div>
-
-        <div className="button-row">
-          <button type="button" className="secondary-button" onClick={applyDaoDefaultsToAllBlocks}>
-            Load DAO primitives into blocks
-          </button>
-        </div>
-
-        {selectedGovernance ? (
-          <p className="hint-text">
-            Governance: <code>{selectedGovernance.address}</code> | Native treasury: <code>{selectedGovernance.nativeTreasuryAddress}</code>
-          </p>
-        ) : (
-          <p className="hint-text">No default governance configured yet. Set one on the DAO page.</p>
-        )}
-
-        <div className="flow-palette">
-          {supportedBlockTypes.map((typeItem) => (
-            <button
-              key={typeItem.value}
-              type="button"
-              className="secondary-button"
-              onClick={() => addBlock(typeItem.value)}
-            >
-              + {typeItem.label}
-            </button>
-          ))}
-        </div>
-
-        {orderingPreview.error ? <p className="error-text">{orderingPreview.error}</p> : null}
-        <p className="hint-text">
-          Connect only real execution dependencies. Example: account setup to transfer, config update to upgrade, stream setup to stream action.
-        </p>
-
-        <div className="flow-canvas-board" ref={canvasRef}>
-          <svg className="flow-canvas-svg" aria-hidden="true">
-            {edgePaths.map((edge) => (
-              <path key={edge.id} d={edge.path} />
-            ))}
-          </svg>
-
-          {blocks.map((block) => {
-            const blockId = getString(block.id, makeBlockId());
-            const blockType = getString(block.type, 'transfer-sol') as SupportedBlockType;
-            const node = graphNodeMap.get(blockId);
-            const orderIndex = orderingPreview.ids.findIndex((id) => id === blockId) + 1;
-
-            if (!node) {
-              return null;
-            }
-
-            return (
-              <article
-                key={blockId}
-                className="flow-canvas-node"
-                style={{ left: `${node.x}px`, top: `${node.y}px`, width: `${getNodeWidth(blockId)}px` }}
-                onMouseDown={(event) => startNodeDrag(event, blockId)}
+          <div className="flow-palette">
+            {supportedBlockTypes.map((typeItem) => (
+              <button
+                key={typeItem.value}
+                type="button"
+                className="secondary-button"
+                onClick={() => addBlock(typeItem.value)}
               >
-                <div className="flow-node-header">
-                  <div className="flow-node-title">
-                    <span className="status-chip status-chip--gray">#{orderIndex > 0 ? orderIndex : '-'}</span>
-                    <strong>{getString(block.label, 'Untitled block')}</strong>
+                + {typeItem.label}
+              </button>
+            ))}
+          </div>
+
+          {orderingPreview.error ? <p className="error-text">{orderingPreview.error}</p> : null}
+          <p className="hint-text">Drag from empty block area. Resize from bottom-right corner.</p>
+
+          <div
+            className="flow-canvas-board"
+            ref={canvasRef}
+            style={{ minWidth: `${canvasSize.width}px`, height: `${canvasSize.height}px` }}
+          >
+            <svg className="flow-canvas-svg" aria-hidden="true">
+              {edgePaths.map((edge) => (
+                <path key={edge.id} d={edge.path} />
+              ))}
+            </svg>
+
+            {blocks.map((block) => {
+              const blockId = getString(block.id, makeBlockId());
+              const blockType = getString(block.type, 'transfer-sol') as SupportedBlockType;
+              const node = graphNodeMap.get(blockId);
+              const orderIndex = orderingPreview.ids.findIndex((id) => id === blockId) + 1;
+
+              if (!node) {
+                return null;
+              }
+
+              return (
+                <article
+                  key={blockId}
+                  className="flow-canvas-node"
+                  style={{ left: `${node.x}px`, top: `${node.y}px`, width: `${getNodeWidth(blockId)}px` }}
+                  onMouseDown={(event) => startNodeDrag(event, blockId)}
+                >
+                  <div className="flow-node-header">
+                    <div className="flow-node-title">
+                      <span className="status-chip status-chip--gray">#{orderIndex > 0 ? orderIndex : '-'}</span>
+                      <strong>{getString(block.label, 'Untitled block')}</strong>
+                    </div>
+
+                    <div className="flow-node-actions">
+                      <button type="button" className="secondary-button flow-node-mini" onClick={() => removeBlock(blockId)}>
+                        Remove
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="flow-node-actions">
-                    <button type="button" className="secondary-button flow-node-mini" onClick={() => removeBlock(blockId)}>
-                      Remove
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flow-link-row">
-                  <button
-                    type="button"
-                    className={`secondary-button flow-node-mini ${pendingLinkSourceId === blockId ? 'flow-link-active' : ''}`}
-                    onClick={() => setPendingLinkSourceId((current) => (current === blockId ? null : blockId))}
-                  >
-                    {pendingLinkSourceId === blockId ? 'Linking...' : 'Start link'}
-                  </button>
-
-                  {pendingLinkSourceId && pendingLinkSourceId !== blockId ? (
+                  <div className="flow-link-row">
                     <button
                       type="button"
-                      className="secondary-button flow-node-mini"
-                      onClick={() => connectNodes(pendingLinkSourceId, blockId)}
+                      className={`secondary-button flow-node-mini ${pendingLinkSourceId === blockId ? 'flow-link-active' : ''}`}
+                      onClick={() => setPendingLinkSourceId((current) => (current === blockId ? null : blockId))}
                     >
-                      Link here
+                      {pendingLinkSourceId === blockId ? 'Linking...' : 'Start link'}
                     </button>
-                  ) : null}
-                </div>
 
-                <div className="form-grid two-col">
-                  <label className="input-label">
-                    Label
-                    <input
-                      className="text-input"
-                      value={getString(block.label)}
-                      onChange={(event) => setBlockField(blockId, 'label', event.target.value)}
-                    />
-                  </label>
-                  <label className="input-label">
-                    Type
-                    <select
-                      className="select-input"
-                      value={blockType}
-                      onChange={(event) => changeBlockType(blockId, event.target.value as SupportedBlockType)}
-                    >
-                      {supportedBlockTypes.map((typeItem) => (
-                        <option key={typeItem.value} value={typeItem.value}>
-                          {typeItem.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
+                    {pendingLinkSourceId && pendingLinkSourceId !== blockId ? (
+                      <button
+                        type="button"
+                        className="secondary-button flow-node-mini"
+                        onClick={() => connectNodes(pendingLinkSourceId, blockId)}
+                      >
+                        Link here
+                      </button>
+                    ) : null}
+                  </div>
 
-                {renderNodeFields(block)}
+                  <div className="form-grid two-col">
+                    <label className="input-label">
+                      Label
+                      <input
+                        className="text-input"
+                        value={getString(block.label)}
+                        onChange={(event) => setBlockField(blockId, 'label', event.target.value)}
+                      />
+                    </label>
+                    <label className="input-label">
+                      Type
+                      <select
+                        className="select-input"
+                        value={blockType}
+                        onChange={(event) => changeBlockType(blockId, event.target.value as SupportedBlockType)}
+                      >
+                        {supportedBlockTypes.map((typeItem) => (
+                          <option key={typeItem.value} value={typeItem.value}>
+                            {typeItem.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
 
-                <button
-                  type="button"
-                  className="flow-node-resize-handle"
-                  onMouseDown={(event) => startNodeResize(event, blockId)}
-                  aria-label="Resize block"
-                  title="Resize block"
-                />
-              </article>
-            );
-          })}
-        </div>
+                  {renderNodeFields(block)}
 
-        {graphEdges.length > 0 ? (
-          <div className="flow-edge-list">
-            <p className="hint-text">Links</p>
-            {graphEdges.map((edge) => (
-              <div key={edge.id} className="flow-edge-item">
-                <span>
-                  {edge.source.slice(0, 6)}... to {edge.target.slice(0, 6)}...
-                </span>
-                <button type="button" className="secondary-button flow-node-mini" onClick={() => removeEdge(edge.id)}>
-                  Remove link
-                </button>
-              </div>
-            ))}
+                  <button
+                    type="button"
+                    className="flow-node-resize-handle"
+                    onMouseDown={(event) => startNodeResize(event, blockId)}
+                    aria-label="Resize block"
+                    title="Resize block"
+                  />
+                </article>
+              );
+            })}
           </div>
-        ) : null}
-        <div className="button-row">
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => setActiveStep('compile')}
-            disabled={isAutoSaving}
-          >
-            Next: Compile
-          </button>
-        </div>
-      </article>
+
+          {graphEdges.length > 0 ? (
+            <div className="flow-edge-list">
+              <p className="hint-text">Links</p>
+              {graphEdges.map((edge) => (
+                <div key={edge.id} className="flow-edge-item">
+                  <span>
+                    {edge.source.slice(0, 6)}... to {edge.target.slice(0, 6)}...
+                  </span>
+                  <button type="button" className="secondary-button flow-node-mini" onClick={() => removeEdge(edge.id)}>
+                    Remove link
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <div className="button-row">
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => setActiveStep('compile')}
+              disabled={isAutoSaving}
+            >
+              Next: Compile
+            </button>
+          </div>
+        </article>
       ) : null}
 
       {activeStep === 'compile' ? (
