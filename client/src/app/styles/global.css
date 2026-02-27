@@ -1430,14 +1430,6 @@ p {
   min-width: 220px;
 }
 
-.flow-builder-status-row {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-}
-
 .flow-builder-save-meta {
   margin-left: auto;
   text-align: right;
@@ -1504,43 +1496,46 @@ p {
   height: 82vh;
   min-height: 760px;
   max-height: 960px;
-  overflow: auto;
+  overflow: hidden;
 }
 
-.flow-canvas-board {
-  position: relative;
-  min-width: 100%;
-  min-height: 100%;
-  background: var(--bg);
-  overflow: visible;
-}
-
-.flow-canvas-svg {
-  position: absolute;
-  inset: 0;
+.flow-canvas-flow {
   width: 100%;
   height: 100%;
-  pointer-events: none;
 }
 
-.flow-canvas-svg path {
-  fill: none;
-  stroke: #666;
-  stroke-width: 2.5px;
-  stroke-dasharray: 5 4;
+.flow-canvas-shell .react-flow__node-flowBlock {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  border-radius: 0;
 }
 
-.flow-canvas-node {
-  width: 360px;
-  position: absolute;
+.flow-canvas-shell .react-flow__handle {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--black);
+  background: var(--yellow);
+  border-radius: 0;
+}
+
+.flow-canvas-shell .react-flow__controls {
+  border: var(--border);
+  box-shadow: var(--shadow);
+}
+
+.flow-canvas-shell .react-flow__controls-button {
+  border-bottom: 1px solid #d8d8d8;
+}
+
+.flow-block-node {
   border: var(--border);
   background: var(--white);
   padding: 0.65rem;
   display: grid;
   gap: 0.55rem;
   box-shadow: var(--shadow);
-  cursor: grab;
-  user-select: none;
 }
 
 .flow-node-header {
@@ -1568,22 +1563,12 @@ p {
   box-shadow: none;
 }
 
-.flow-canvas-node input,
-.flow-canvas-node textarea,
-.flow-canvas-node select,
-.flow-canvas-node button {
+.flow-block-node input,
+.flow-block-node textarea,
+.flow-block-node select,
+.flow-block-node button {
   user-select: text;
   cursor: auto;
-}
-
-.flow-link-row {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-}
-
-.flow-link-active {
-  background: var(--yellow);
 }
 
 .flow-edge-list {
@@ -1607,20 +1592,6 @@ p {
 
 .flow-edge-item span {
   overflow-wrap: anywhere;
-}
-
-.flow-canvas-node .flow-node-resize-handle {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
-  width: 14px;
-  height: 14px;
-  border: var(--border);
-  background: var(--yellow);
-  box-shadow: none;
-  cursor: nwse-resize;
-  user-select: none;
-  padding: 0;
 }
 
 .subheading {
@@ -1803,11 +1774,11 @@ p {
     min-height: 560px;
   }
 
-  .flow-canvas-board {
+  .flow-canvas-flow {
     min-height: 100%;
   }
 
-  .flow-canvas-node {
+  .flow-block-node {
     width: min(320px, calc(100vw - 4.2rem));
   }
 
@@ -1818,11 +1789,6 @@ p {
   .flow-inline-input {
     min-width: 0;
     width: 100%;
-  }
-
-  .flow-builder-status-row {
-    flex-direction: column;
-    align-items: flex-start;
   }
 
   .form-grid.two-col,

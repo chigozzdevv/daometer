@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   compileInlineFlow,
   getDaoById,
@@ -18,13 +18,27 @@ import {
 } from '@/features/dashboard/api/api';
 import { formatDateTime } from '@/features/dashboard/lib/format';
 import { getSolanaProvider, sendPreparedTransaction } from '@/shared/solana/wallet';
+import ReactFlow, {
+  Background,
+  Controls,
+  Handle,
+  Position,
+  type Connection,
+  type Edge,
+  type EdgeChange,
+  type Node,
+  type NodeChange,
+  type NodeProps,
+  type NodeTypes,
+} from 'reactflow';
+import { NodeResizer } from '@reactflow/node-resizer';
+import 'reactflow/dist/style.css';
+import '@reactflow/node-resizer/dist/style.css';
 
 const canvasNodeHeight = 210;
 const defaultNodeWidth = 360;
 const minNodeWidth = 280;
 const maxNodeWidth = 560;
-const canvasBoardWidth = 1680;
-const canvasBoardHeight = 2400;
 const PLACEHOLDER_PUBKEY = '11111111111111111111111111111111';
 const PLACEHOLDER_BASE64 = 'AQ==';
 
@@ -46,6 +60,81 @@ const supportedBlockTypes: Array<{ value: SupportedBlockType; label: string }> =
   { value: 'create-stream', label: 'Create Stream' },
   { value: 'custom-instruction', label: 'Custom Instruction' },
 ];
+
+type FlowBlockNodeData = {
+  block: FlowBlockInput;
+  blockType: SupportedBlockType;
+  orderIndex: number;
+  onRemove: (blockId: string) => void;
+  onChangeType: (blockId: string, nextType: SupportedBlockType) => void;
+  onChangeField: (blockId: string, field: string, value: unknown) => void;
+  onResizeWidth: (blockId: string, width: number) => void;
+  renderFields: (block: FlowBlockInput) => JSX.Element;
+};
+
+const FlowBlockNode = ({ id, data, selected }: NodeProps<FlowBlockNodeData>): JSX.Element => {
+  const blockId = getString(data.block.id, id);
+
+  return (
+    <>
+      <NodeResizer
+        isVisible={selected}
+        minWidth={minNodeWidth}
+        minHeight={canvasNodeHeight}
+        lineStyle={{ borderColor: '#111' }}
+        handleStyle={{ width: 12, height: 12, border: '2px solid #111', background: '#f4d400', borderRadius: 0 }}
+        onResizeEnd={(_, params) => data.onResizeWidth(blockId, getNumber((params as { width?: number }).width, defaultNodeWidth))}
+      />
+      <Handle type="target" position={Position.Left} />
+      <div className="flow-block-node">
+        <div className="flow-node-header">
+          <div className="flow-node-title">
+            <span className="status-chip status-chip--gray">#{data.orderIndex > 0 ? data.orderIndex : '-'}</span>
+            <strong>{getString(data.block.label, 'Untitled block')}</strong>
+          </div>
+
+          <div className="flow-node-actions nodrag">
+            <button type="button" className="secondary-button flow-node-mini nodrag" onClick={() => data.onRemove(blockId)}>
+              Remove
+            </button>
+          </div>
+        </div>
+
+        <div className="form-grid two-col nodrag">
+          <label className="input-label">
+            Label
+            <input
+              className="text-input"
+              value={getString(data.block.label)}
+              onChange={(event) => data.onChangeField(blockId, 'label', event.target.value)}
+            />
+          </label>
+          <label className="input-label">
+            Type
+            <select
+              className="select-input"
+              value={data.blockType}
+              onChange={(event) => data.onChangeType(blockId, event.target.value as SupportedBlockType)}
+            >
+              {supportedBlockTypes.map((typeItem) => (
+                <option key={typeItem.value} value={typeItem.value}>
+                  {typeItem.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="nodrag">{data.renderFields(data.block)}</div>
+      </div>
+      <Handle type="source" position={Position.Right} />
+    </>
+  );
+};
+
+const flowNodeTypes: NodeTypes = {
+  flowBlock: FlowBlockNode,
+};
 
 const makeBlockId = (): string => `block-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const makeEdgeId = (sourceId: string, targetId: string, index: number): string =>
@@ -325,7 +414,6 @@ type FlowEditorProps = {
 type EditorStep = 'builder' | 'compile' | 'publish';
 
 export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }: FlowEditorProps): JSX.Element => {
-  const canvasRef = useRef<HTMLDivElement | null>(null);
   const autosaveTimerRef = useRef<number | null>(null);
 
   const [activeStep, setActiveStep] = useState<EditorStep>('builder');
@@ -350,17 +438,6 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
   const [graphNodes, setGraphNodes] = useState<FlowGraphNode[]>([]);
   const [graphEdges, setGraphEdges] = useState<FlowGraphEdge[]>([]);
   const [nodeWidths, setNodeWidths] = useState<Record<string, number>>({});
-  const [pendingLinkSourceId, setPendingLinkSourceId] = useState<string | null>(null);
-  const [draggingNode, setDraggingNode] = useState<{
-    nodeId: string;
-    offsetX: number;
-    offsetY: number;
-  } | null>(null);
-  const [resizingNode, setResizingNode] = useState<{
-    nodeId: string;
-    startClientX: number;
-    startWidth: number;
-  } | null>(null);
 
   const [compileContextJson, setCompileContextJson] = useState('{}');
   const [compileResult, setCompileResult] = useState<FlowCompilationResult | null>(null);
@@ -393,35 +470,6 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
       };
     }
   }, [blocks, graphEdges]);
-
-  const edgePaths = useMemo(
-    () =>
-      graphEdges
-        .map((edge) => {
-          const sourceNode = graphNodeMap.get(edge.source);
-          const targetNode = graphNodeMap.get(edge.target);
-
-          if (!sourceNode || !targetNode) {
-            return null;
-          }
-
-          const sourceWidth = getNodeWidth(sourceNode.id);
-          const startX = sourceNode.x + sourceWidth - 8;
-          const startY = sourceNode.y + 58;
-          const endX = targetNode.x + 8;
-          const endY = targetNode.y + 58;
-          const bendOffset = Math.max(60, Math.abs(endX - startX) * 0.35);
-          const controlX1 = startX + bendOffset;
-          const controlX2 = endX - bendOffset;
-
-          return {
-            id: edge.id,
-            path: `M ${startX} ${startY} C ${controlX1} ${startY}, ${controlX2} ${endY}, ${endX} ${endY}`,
-          };
-        })
-        .filter((item): item is { id: string; path: string } => Boolean(item)),
-    [graphEdges, graphNodeMap, nodeWidths],
-  );
 
   const markDirty = (): void => {
     if (!isHydrating) {
@@ -461,7 +509,6 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
         ),
       );
       setActiveStep('builder');
-      setPendingLinkSourceId(null);
       setIsDirty(false);
       setCompileResult(null);
       setLastPublishResult(null);
@@ -560,83 +607,6 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
     selectedGovernance?.nativeTreasuryAddress,
     publishGoverningTokenMint,
   ]);
-
-  useEffect(() => {
-    if (!draggingNode) {
-      return;
-    }
-
-    const handleMove = (event: MouseEvent): void => {
-      const board = canvasRef.current;
-
-      if (!board) {
-        return;
-      }
-
-      const rect = board.getBoundingClientRect();
-      const draggingWidth = getNodeWidth(draggingNode.nodeId);
-      const maxX = Math.max(8, rect.width - draggingWidth - 8);
-      const maxY = Math.max(8, rect.height - canvasNodeHeight - 8);
-      const nextX = clamp(event.clientX - rect.left - draggingNode.offsetX, 8, maxX);
-      const nextY = clamp(event.clientY - rect.top - draggingNode.offsetY, 8, maxY);
-
-      setGraphNodes((current) =>
-        current.map((node) =>
-          node.id === draggingNode.nodeId
-            ? {
-                ...node,
-                x: nextX,
-                y: nextY,
-              }
-            : node,
-        ),
-      );
-      markDirty();
-    };
-
-    const handleUp = (): void => {
-      setDraggingNode(null);
-    };
-
-    window.addEventListener('mousemove', handleMove);
-    window.addEventListener('mouseup', handleUp);
-
-    return () => {
-      window.removeEventListener('mousemove', handleMove);
-      window.removeEventListener('mouseup', handleUp);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draggingNode, nodeWidths]);
-
-  useEffect(() => {
-    if (!resizingNode) {
-      return;
-    }
-
-    const handleMove = (event: MouseEvent): void => {
-      const deltaX = event.clientX - resizingNode.startClientX;
-      const nextWidth = clamp(resizingNode.startWidth + deltaX, minNodeWidth, maxNodeWidth);
-
-      setNodeWidths((current) => ({
-        ...current,
-        [resizingNode.nodeId]: nextWidth,
-      }));
-      markDirty();
-    };
-
-    const handleUp = (): void => {
-      setResizingNode(null);
-    };
-
-    window.addEventListener('mousemove', handleMove);
-    window.addEventListener('mouseup', handleUp);
-
-    return () => {
-      window.removeEventListener('mousemove', handleMove);
-      window.removeEventListener('mouseup', handleUp);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resizingNode]);
 
   const normalizeBlocksForApi = (items: FlowBlockInput[]): FlowBlockInput[] =>
     items.map((block) => {
@@ -1010,24 +980,6 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
       delete next[blockId];
       return next;
     });
-    setPendingLinkSourceId((current) => (current === blockId ? null : current));
-    markDirty();
-  };
-
-  const connectNodes = (sourceId: string, targetId: string): void => {
-    if (!sourceId || !targetId || sourceId === targetId) {
-      return;
-    }
-
-    setGraphEdges((current) => {
-      if (current.some((edge) => edge.source === sourceId && edge.target === targetId)) {
-        return current;
-      }
-
-      return [...current, { id: makeEdgeId(sourceId, targetId, current.length), source: sourceId, target: targetId }];
-    });
-
-    setPendingLinkSourceId(null);
     markDirty();
   };
 
@@ -1071,46 +1023,6 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
     );
 
     markDirty();
-  };
-
-  const isInteractiveTarget = (target: EventTarget | null): boolean => {
-    if (!(target instanceof HTMLElement)) {
-      return false;
-    }
-
-    return Boolean(target.closest('input, textarea, select, button, a, label'));
-  };
-
-  const startNodeDrag = (event: ReactMouseEvent<HTMLElement>, nodeId: string): void => {
-    if (isInteractiveTarget(event.target)) {
-      return;
-    }
-
-    event.preventDefault();
-
-    const board = canvasRef.current;
-    const node = graphNodeMap.get(nodeId);
-
-    if (!board || !node) {
-      return;
-    }
-
-    const rect = board.getBoundingClientRect();
-    const offsetX = event.clientX - rect.left - node.x;
-    const offsetY = event.clientY - rect.top - node.y;
-
-    setDraggingNode({ nodeId, offsetX, offsetY });
-  };
-
-  const startNodeResize = (event: ReactMouseEvent<HTMLButtonElement>, nodeId: string): void => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    setResizingNode({
-      nodeId,
-      startClientX: event.clientX,
-      startWidth: getNodeWidth(nodeId),
-    });
   };
 
   const renderNodeFields = (block: FlowBlockInput): JSX.Element => {
@@ -1289,6 +1201,118 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
     );
   };
 
+  const handleNodeResize = (blockId: string, width: number): void => {
+    const nextWidth = clamp(width, minNodeWidth, maxNodeWidth);
+
+    setNodeWidths((current) => ({
+      ...current,
+      [blockId]: nextWidth,
+    }));
+    markDirty();
+  };
+
+  const handleNodesChange = (changes: NodeChange[]): void => {
+    let didMutateGraph = false;
+    let didResize = false;
+    const widthUpdates: Record<string, number> = {};
+
+    setGraphNodes((current) => {
+      let next = current;
+
+      changes.forEach((change) => {
+        if (change.type === 'position' && change.position) {
+          didMutateGraph = true;
+          next = next.map((node) =>
+            node.id === change.id
+              ? {
+                  ...node,
+                  x: Math.max(0, change.position?.x ?? node.x),
+                  y: Math.max(0, change.position?.y ?? node.y),
+                }
+              : node,
+          );
+        }
+
+        if (change.type === 'dimensions' && change.dimensions?.width) {
+          didResize = true;
+          widthUpdates[change.id] = clamp(change.dimensions.width, minNodeWidth, maxNodeWidth);
+        }
+      });
+
+      return next;
+    });
+
+    if (didResize) {
+      setNodeWidths((current) => ({
+        ...current,
+        ...widthUpdates,
+      }));
+    }
+
+    if (didMutateGraph || didResize) {
+      markDirty();
+    }
+  };
+
+  const handleEdgesChange = (changes: EdgeChange[]): void => {
+    const removedIds = changes.filter((change) => change.type === 'remove').map((change) => change.id);
+
+    if (removedIds.length === 0) {
+      return;
+    }
+
+    setGraphEdges((current) => current.filter((edge) => !removedIds.includes(edge.id)));
+    markDirty();
+  };
+
+  const handleConnect = (connection: Connection): void => {
+    const sourceId = connection.source ?? '';
+    const targetId = connection.target ?? '';
+
+    if (!sourceId || !targetId || sourceId === targetId) {
+      return;
+    }
+
+    setGraphEdges((current) => {
+      if (current.some((edge) => edge.source === sourceId && edge.target === targetId)) {
+        return current;
+      }
+
+      return [...current, { id: makeEdgeId(sourceId, targetId, current.length), source: sourceId, target: targetId }];
+    });
+    markDirty();
+  };
+
+  const reactFlowNodes: Array<Node<FlowBlockNodeData>> = blocks.map((block, index) => {
+    const blockId = getString(block.id, makeBlockId());
+    const graphNode = graphNodeMap.get(blockId) ?? getDefaultNodePosition(index);
+    const blockType = getString(block.type, 'transfer-sol') as SupportedBlockType;
+
+    return {
+      id: blockId,
+      type: 'flowBlock',
+      position: { x: graphNode.x, y: graphNode.y },
+      style: { width: getNodeWidth(blockId) },
+      data: {
+        block,
+        blockType,
+        orderIndex: orderingPreview.ids.findIndex((id) => id === blockId) + 1,
+        onRemove: removeBlock,
+        onChangeType: changeBlockType,
+        onChangeField: setBlockField,
+        onResizeWidth: handleNodeResize,
+        renderFields: renderNodeFields,
+      },
+    };
+  });
+
+  const reactFlowEdges: Edge[] = graphEdges.map((edge) => ({
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    type: 'smoothstep',
+  }));
+
   if (isLoadingFlow) {
     return <p className="hint-text">Loading flow builder...</p>;
   }
@@ -1349,107 +1373,27 @@ export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }
           </div>
 
           {orderingPreview.error ? <p className="error-text">{orderingPreview.error}</p> : null}
-          <p className="hint-text">Drag from empty block area. Resize from bottom-right corner.</p>
+          <p className="hint-text">Drag nodes to arrange. Connect side handles. Resize selected nodes.</p>
 
           <div className="flow-canvas-shell">
-            <div
-              className="flow-canvas-board"
-              ref={canvasRef}
-              style={{ width: `${canvasBoardWidth}px`, height: `${canvasBoardHeight}px` }}
-            >
-              <svg className="flow-canvas-svg" aria-hidden="true">
-                {edgePaths.map((edge) => (
-                  <path key={edge.id} d={edge.path} />
-                ))}
-              </svg>
-
-              {blocks.map((block) => {
-                const blockId = getString(block.id, makeBlockId());
-                const blockType = getString(block.type, 'transfer-sol') as SupportedBlockType;
-                const node = graphNodeMap.get(blockId);
-                const orderIndex = orderingPreview.ids.findIndex((id) => id === blockId) + 1;
-
-                if (!node) {
-                  return null;
-                }
-
-                return (
-                  <article
-                    key={blockId}
-                    className="flow-canvas-node"
-                    style={{ left: `${node.x}px`, top: `${node.y}px`, width: `${getNodeWidth(blockId)}px` }}
-                    onMouseDown={(event) => startNodeDrag(event, blockId)}
-                  >
-                    <div className="flow-node-header">
-                      <div className="flow-node-title">
-                        <span className="status-chip status-chip--gray">#{orderIndex > 0 ? orderIndex : '-'}</span>
-                        <strong>{getString(block.label, 'Untitled block')}</strong>
-                      </div>
-
-                      <div className="flow-node-actions">
-                        <button type="button" className="secondary-button flow-node-mini" onClick={() => removeBlock(blockId)}>
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flow-link-row">
-                      <button
-                        type="button"
-                        className={`secondary-button flow-node-mini ${pendingLinkSourceId === blockId ? 'flow-link-active' : ''}`}
-                        onClick={() => setPendingLinkSourceId((current) => (current === blockId ? null : blockId))}
-                      >
-                        {pendingLinkSourceId === blockId ? 'Linking...' : 'Start link'}
-                      </button>
-
-                      {pendingLinkSourceId && pendingLinkSourceId !== blockId ? (
-                        <button
-                          type="button"
-                          className="secondary-button flow-node-mini"
-                          onClick={() => connectNodes(pendingLinkSourceId, blockId)}
-                        >
-                          Link here
-                        </button>
-                      ) : null}
-                    </div>
-
-                    <div className="form-grid two-col">
-                      <label className="input-label">
-                        Label
-                        <input
-                          className="text-input"
-                          value={getString(block.label)}
-                          onChange={(event) => setBlockField(blockId, 'label', event.target.value)}
-                        />
-                      </label>
-                      <label className="input-label">
-                        Type
-                        <select
-                          className="select-input"
-                          value={blockType}
-                          onChange={(event) => changeBlockType(blockId, event.target.value as SupportedBlockType)}
-                        >
-                          {supportedBlockTypes.map((typeItem) => (
-                            <option key={typeItem.value} value={typeItem.value}>
-                              {typeItem.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-
-                    {renderNodeFields(block)}
-
-                    <button
-                      type="button"
-                      className="flow-node-resize-handle"
-                      onMouseDown={(event) => startNodeResize(event, blockId)}
-                      aria-label="Resize block"
-                      title="Resize block"
-                    />
-                  </article>
-                );
-              })}
+            <div className="flow-canvas-flow">
+              <ReactFlow
+                nodes={reactFlowNodes}
+                edges={reactFlowEdges}
+                nodeTypes={flowNodeTypes}
+                onNodesChange={handleNodesChange}
+                onEdgesChange={handleEdgesChange}
+                onConnect={handleConnect}
+                defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+                minZoom={0.45}
+                maxZoom={1.5}
+                proOptions={{ hideAttribution: true }}
+                deleteKeyCode={null}
+                selectionOnDrag={false}
+              >
+                <Background gap={20} size={2} color="#d9d9d9" />
+                <Controls position="bottom-right" />
+              </ReactFlow>
             </div>
           </div>
 
