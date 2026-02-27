@@ -1,23 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   compileInlineFlow,
-  createFlow,
   getFlowById,
   publishFlow,
-  type DaoItem,
   type FlowBlockInput,
   type FlowCompilationResult,
   type FlowGraph,
   type FlowGraphEdge,
   type FlowGraphNode,
-  type FlowItem,
-  type FlowProposalDefaults,
   type PublishFlowResult,
   updateFlow,
 } from '@/features/dashboard/api/api';
 import { formatDateTime } from '@/features/dashboard/lib/format';
 
-const newFlowKey = '__new-flow';
 const canvasNodeWidth = 360;
 const canvasNodeHeight = 210;
 
@@ -38,17 +33,6 @@ const supportedBlockTypes: Array<{ value: SupportedBlockType; label: string }> =
   { value: 'custom-instruction', label: 'Custom Instruction' },
 ];
 
-const defaultProposalDefaults: FlowProposalDefaults = {
-  titlePrefix: 'Proposal',
-  voteScope: 'community',
-  state: 'voting',
-  holdUpSeconds: 0,
-  votingDurationHours: 72,
-  autoExecute: true,
-  executeAfterHoldUp: true,
-  maxRiskScore: 70,
-};
-
 const makeBlockId = (): string => `block-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const makeEdgeId = (sourceId: string, targetId: string, index: number): string =>
   `edge-${sourceId.slice(-4)}-${targetId.slice(-4)}-${index}`;
@@ -58,16 +42,14 @@ const getDefaultNodePosition = (index: number): { x: number; y: number } => ({
   y: 40 + Math.floor(index / 3) * 260,
 });
 
-const createInitialBlocks = (): FlowBlockInput[] => [
-  {
-    id: makeBlockId(),
-    type: 'transfer-sol',
-    label: 'Treasury transfer',
-    fromGovernance: '',
-    toWallet: '',
-    lamports: 1_000_000,
-  },
-];
+const createDefaultBlock = (): FlowBlockInput => ({
+  id: makeBlockId(),
+  type: 'transfer-sol',
+  label: 'Treasury transfer',
+  fromGovernance: '',
+  toWallet: '',
+  lamports: 1_000_000,
+});
 
 const defaultBlockForType = (type: SupportedBlockType): FlowBlockInput => {
   if (type === 'transfer-sol') {
@@ -156,28 +138,7 @@ const deriveGraphFromBlocks = (blocks: FlowBlockInput[]): FlowGraph => {
     return { id: blockId, x, y };
   });
 
-  const edges: FlowGraphEdge[] = blocks
-    .map((block, index) => {
-      if (index >= blocks.length - 1) {
-        return null;
-      }
-
-      const sourceId = getString(block.id);
-      const targetId = getString(blocks[index + 1]?.id);
-
-      if (!sourceId || !targetId) {
-        return null;
-      }
-
-      return {
-        id: makeEdgeId(sourceId, targetId, index),
-        source: sourceId,
-        target: targetId,
-      };
-    })
-    .filter((edge): edge is FlowGraphEdge => Boolean(edge));
-
-  return { nodes, edges };
+  return { nodes, edges: [] };
 };
 
 const normalizeGraphForBlocks = (
@@ -295,7 +256,7 @@ const topologicalSortBlocks = (blocks: FlowBlockInput[], edges: FlowGraphEdge[])
   }
 
   if (orderedIds.length !== blocks.length) {
-    throw new Error('Flow contains circular links. Remove the cycle before saving or publishing.');
+    throw new Error('Flow has circular links. Remove cycles before compile/publish.');
   }
 
   return orderedIds.map((id) => blockMap.get(id)).filter((block): block is FlowBlockInput => Boolean(block));
@@ -308,22 +269,6 @@ const parseJson = <TValue,>(raw: string, label: string): TValue => {
     throw new Error(`${label} must be valid JSON`);
   }
 };
-
-const parseInteger = (value: string, label: string): number => {
-  const parsed = Number.parseInt(value, 10);
-
-  if (!Number.isFinite(parsed)) {
-    throw new Error(`${label} must be a valid integer`);
-  }
-
-  return parsed;
-};
-
-const toTags = (value: string): string[] =>
-  value
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
 
 const getString = (value: unknown, fallback = ''): string => (typeof value === 'string' ? value : fallback);
 
@@ -347,91 +292,41 @@ const clamp = (value: number, min: number, max: number): number => Math.min(Math
 
 type FlowEditorProps = {
   accessToken: string;
-  selectedDaoId: string;
-  daos: DaoItem[];
-  flows: FlowItem[];
-  onFlowSaved: (flow: FlowItem) => void;
+  flowId: string;
+  onFlowSaved: () => void;
   onFlowPublished: (result: PublishFlowResult) => void;
 };
 
-export const FlowEditor = ({
-  accessToken,
-  selectedDaoId,
-  daos,
-  flows,
-  onFlowSaved,
-  onFlowPublished,
-}: FlowEditorProps): JSX.Element => {
-  const initialBlocks = useMemo(() => createInitialBlocks(), []);
-  const initialGraph = useMemo(() => deriveGraphFromBlocks(initialBlocks), [initialBlocks]);
+export const FlowEditor = ({ accessToken, flowId, onFlowSaved, onFlowPublished }: FlowEditorProps): JSX.Element => {
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const autosaveTimerRef = useRef<number | null>(null);
 
-  const [activeFlowId, setActiveFlowId] = useState<string>(newFlowKey);
-  const [isLoadingFlow, setIsLoadingFlow] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+  const [flowName, setFlowName] = useState('');
+  const [flowDescription, setFlowDescription] = useState('');
+  const [isLoadingFlow, setIsLoadingFlow] = useState(true);
+  const [isHydrating, setIsHydrating] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [isAutoSaving, setIsAutoSaving] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+
   const [isCompiling, setIsCompiling] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [tagsInput, setTagsInput] = useState('');
-  const [status, setStatus] = useState<'draft' | 'published' | 'archived'>('draft');
-  const [blocks, setBlocks] = useState<FlowBlockInput[]>(initialBlocks);
-  const [graphNodes, setGraphNodes] = useState<FlowGraphNode[]>(initialGraph.nodes);
-  const [graphEdges, setGraphEdges] = useState<FlowGraphEdge[]>(initialGraph.edges);
+  const [blocks, setBlocks] = useState<FlowBlockInput[]>([]);
+  const [graphNodes, setGraphNodes] = useState<FlowGraphNode[]>([]);
+  const [graphEdges, setGraphEdges] = useState<FlowGraphEdge[]>([]);
   const [pendingLinkSourceId, setPendingLinkSourceId] = useState<string | null>(null);
-
   const [draggingNode, setDraggingNode] = useState<{
     nodeId: string;
     offsetX: number;
     offsetY: number;
   } | null>(null);
 
-  const [titlePrefix, setTitlePrefix] = useState(defaultProposalDefaults.titlePrefix);
-  const [proposalVoteScope, setProposalVoteScope] = useState<'community' | 'council'>(defaultProposalDefaults.voteScope);
-  const [proposalState, setProposalState] = useState<'draft' | 'voting'>(defaultProposalDefaults.state);
-  const [holdUpSeconds, setHoldUpSeconds] = useState(defaultProposalDefaults.holdUpSeconds.toString());
-  const [votingDurationHours, setVotingDurationHours] = useState(defaultProposalDefaults.votingDurationHours.toString());
-  const [autoExecute, setAutoExecute] = useState(defaultProposalDefaults.autoExecute);
-  const [executeAfterHoldUp, setExecuteAfterHoldUp] = useState(defaultProposalDefaults.executeAfterHoldUp);
-  const [maxRiskScore, setMaxRiskScore] = useState(defaultProposalDefaults.maxRiskScore.toString());
-
   const [compileContextJson, setCompileContextJson] = useState('{}');
   const [compileResult, setCompileResult] = useState<FlowCompilationResult | null>(null);
-
-  const [publishTitle, setPublishTitle] = useState('');
-  const [publishDescription, setPublishDescription] = useState('');
-  const [publishVoteScope, setPublishVoteScope] = useState<'community' | 'council'>('community');
-  const [publishState, setPublishState] = useState<'draft' | 'voting'>('voting');
-  const [publishHoldUpSeconds, setPublishHoldUpSeconds] = useState('0');
-  const [publishVotingDurationHours, setPublishVotingDurationHours] = useState('72');
-  const [publishAutoExecute, setPublishAutoExecute] = useState(true);
-  const [publishExecuteAfterHoldUp, setPublishExecuteAfterHoldUp] = useState(true);
-  const [publishMaxRiskScore, setPublishMaxRiskScore] = useState('70');
-
-  const [onchainCreateEnabled, setOnchainCreateEnabled] = useState(true);
-  const [onchainGovernanceProgramId, setOnchainGovernanceProgramId] = useState('');
-  const [onchainProgramVersion, setOnchainProgramVersion] = useState('3');
-  const [onchainRealmAddress, setOnchainRealmAddress] = useState('');
-  const [onchainGovernanceAddress, setOnchainGovernanceAddress] = useState('');
-  const [onchainGoverningTokenMint, setOnchainGoverningTokenMint] = useState('');
-  const [onchainDescriptionLink, setOnchainDescriptionLink] = useState('');
-  const [onchainOptionIndex, setOnchainOptionIndex] = useState('0');
-  const [onchainUseDenyOption, setOnchainUseDenyOption] = useState(true);
-  const [onchainRpcUrl, setOnchainRpcUrl] = useState('');
-  const [onchainSignOff, setOnchainSignOff] = useState(true);
-  const [onchainRequireSimulation, setOnchainRequireSimulation] = useState(true);
-
   const [lastPublishResult, setLastPublishResult] = useState<PublishFlowResult | null>(null);
-
-  const flowOptions = useMemo(
-    () => flows.filter((flow) => flow.daoId === selectedDaoId),
-    [flows, selectedDaoId],
-  );
-
-  const selectedDao = useMemo(() => daos.find((dao) => dao.id === selectedDaoId) ?? null, [daos, selectedDaoId]);
 
   const graphNodeMap = useMemo(() => new Map(graphNodes.map((node) => [node.id, node])), [graphNodes]);
 
@@ -444,7 +339,7 @@ export const FlowEditor = ({
     } catch (orderingError) {
       return {
         ids: blocks.map((block) => getString(block.id)),
-        error: orderingError instanceof Error ? orderingError.message : 'Invalid flow links',
+        error: orderingError instanceof Error ? orderingError.message : 'Invalid links',
       };
     }
   }, [blocks, graphEdges]);
@@ -477,15 +372,52 @@ export const FlowEditor = ({
     [graphEdges, graphNodeMap],
   );
 
-  useEffect(() => {
-    if (!selectedDao) {
-      return;
+  const markDirty = (): void => {
+    if (!isHydrating) {
+      setIsDirty(true);
+      setCompileResult(null);
     }
+  };
 
-    setOnchainGovernanceProgramId((current) => current || selectedDao.governanceProgramId);
-    setOnchainRealmAddress((current) => current || selectedDao.realmAddress);
-    setOnchainGoverningTokenMint((current) => current || selectedDao.communityMint || '');
-  }, [selectedDao]);
+  const hydrateFlow = async (): Promise<void> => {
+    setIsLoadingFlow(true);
+    setError(null);
+
+    try {
+      const flow = await getFlowById(flowId);
+      setIsHydrating(true);
+
+      const loadedBlocks = Array.isArray(flow.blocks) && flow.blocks.length > 0 ? flow.blocks : [createDefaultBlock()];
+      const fallbackGraph = deriveGraphFromBlocks(loadedBlocks);
+      const normalizedGraph = normalizeGraphForBlocks(
+        loadedBlocks,
+        flow.graph?.nodes ?? fallbackGraph.nodes,
+        flow.graph?.edges ?? fallbackGraph.edges,
+      );
+
+      setFlowName(flow.name);
+      setFlowDescription(flow.description ?? '');
+      setBlocks(loadedBlocks);
+      setGraphNodes(normalizedGraph.nodes);
+      setGraphEdges(normalizedGraph.edges);
+      setPendingLinkSourceId(null);
+      setIsDirty(false);
+      setCompileResult(null);
+      setLastPublishResult(null);
+      setSuccess(null);
+      setLastSavedAt(flow.updatedAt);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Unable to load flow');
+    } finally {
+      setIsHydrating(false);
+      setIsLoadingFlow(false);
+    }
+  };
+
+  useEffect(() => {
+    void hydrateFlow();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flowId]);
 
   useEffect(() => {
     if (!draggingNode) {
@@ -516,6 +448,7 @@ export const FlowEditor = ({
             : node,
         ),
       );
+      markDirty();
     };
 
     const handleUp = (): void => {
@@ -529,78 +462,8 @@ export const FlowEditor = ({
       window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('mouseup', handleUp);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draggingNode]);
-
-  const resetForNewFlow = (): void => {
-    const nextBlocks = createInitialBlocks();
-    const nextGraph = deriveGraphFromBlocks(nextBlocks);
-
-    setActiveFlowId(newFlowKey);
-    setName('');
-    setDescription('');
-    setTagsInput('');
-    setStatus('draft');
-    setBlocks(nextBlocks);
-    setGraphNodes(nextGraph.nodes);
-    setGraphEdges(nextGraph.edges);
-    setPendingLinkSourceId(null);
-    setTitlePrefix(defaultProposalDefaults.titlePrefix);
-    setProposalVoteScope(defaultProposalDefaults.voteScope);
-    setProposalState(defaultProposalDefaults.state);
-    setHoldUpSeconds(defaultProposalDefaults.holdUpSeconds.toString());
-    setVotingDurationHours(defaultProposalDefaults.votingDurationHours.toString());
-    setAutoExecute(defaultProposalDefaults.autoExecute);
-    setExecuteAfterHoldUp(defaultProposalDefaults.executeAfterHoldUp);
-    setMaxRiskScore(defaultProposalDefaults.maxRiskScore.toString());
-    setCompileResult(null);
-    setLastPublishResult(null);
-    setSuccess(null);
-    setError(null);
-  };
-
-  const hydrateFlowCanvas = (flow: FlowItem): void => {
-    const flowBlocks = Array.isArray(flow.blocks) && flow.blocks.length > 0 ? flow.blocks : createInitialBlocks();
-    const normalizedGraph = normalizeGraphForBlocks(
-      flowBlocks,
-      flow.graph?.nodes ?? deriveGraphFromBlocks(flowBlocks).nodes,
-      flow.graph?.edges ?? deriveGraphFromBlocks(flowBlocks).edges,
-    );
-
-    setBlocks(flowBlocks);
-    setGraphNodes(normalizedGraph.nodes);
-    setGraphEdges(normalizedGraph.edges);
-    setPendingLinkSourceId(null);
-  };
-
-  const loadFlowIntoEditor = async (flowId: string): Promise<void> => {
-    setIsLoadingFlow(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const flow = await getFlowById(flowId);
-      setActiveFlowId(flow.id);
-      setName(flow.name);
-      setDescription(flow.description ?? '');
-      setTagsInput((flow.tags ?? []).join(', '));
-      setStatus(flow.status);
-      hydrateFlowCanvas(flow);
-      setTitlePrefix(flow.proposalDefaults.titlePrefix);
-      setProposalVoteScope(flow.proposalDefaults.voteScope);
-      setProposalState(flow.proposalDefaults.state);
-      setHoldUpSeconds(flow.proposalDefaults.holdUpSeconds.toString());
-      setVotingDurationHours(flow.proposalDefaults.votingDurationHours.toString());
-      setAutoExecute(flow.proposalDefaults.autoExecute);
-      setExecuteAfterHoldUp(flow.proposalDefaults.executeAfterHoldUp);
-      setMaxRiskScore(flow.proposalDefaults.maxRiskScore.toString());
-      setCompileResult(null);
-      setLastPublishResult(null);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Unable to load flow');
-    } finally {
-      setIsLoadingFlow(false);
-    }
-  };
 
   const normalizeBlocksForApi = (items: FlowBlockInput[]): FlowBlockInput[] =>
     items.map((block) => {
@@ -637,13 +500,6 @@ export const FlowEditor = ({
         };
       }
 
-      if (type === 'program-upgrade') {
-        return {
-          ...block,
-          type,
-        };
-      }
-
       if (type === 'create-stream') {
         return {
           ...block,
@@ -672,198 +528,126 @@ export const FlowEditor = ({
         };
       }
 
-      return block;
+      return {
+        ...block,
+        type,
+      };
     });
 
-  const buildFlowPayload = (): {
-    name: string;
-    description: string;
-    tags: string[];
-    blocks: FlowBlockInput[];
-    graph: FlowGraph;
-    proposalDefaults: FlowProposalDefaults;
-  } => {
+  const buildDraftPayload = (requireAcyclic: boolean): { blocks: FlowBlockInput[]; graph: FlowGraph } => {
     if (!Array.isArray(blocks) || blocks.length === 0) {
-      throw new Error('Add at least one block to the flow');
-    }
-
-    const payloadName = name.trim();
-
-    if (payloadName.length < 2) {
-      throw new Error('Flow name must be at least 2 characters');
+      throw new Error('Add at least one block to continue.');
     }
 
     const normalizedGraph = normalizeGraphForBlocks(blocks, graphNodes, graphEdges);
-    const orderedBlocks = topologicalSortBlocks(blocks, normalizedGraph.edges);
-    const normalizedBlocks = normalizeBlocksForApi(orderedBlocks);
-
-    normalizedBlocks.forEach((block, index) => {
-      if (!getString(block.id)) {
-        throw new Error(`Block ${index + 1} must have an id`);
-      }
-
-      if (!getString(block.type)) {
-        throw new Error(`Block ${index + 1} must have a type`);
-      }
-
-      if (!getString(block.label)) {
-        throw new Error(`Block ${index + 1} must have a label`);
-      }
-    });
+    const baseBlocks = requireAcyclic ? topologicalSortBlocks(blocks, normalizedGraph.edges) : blocks;
+    const normalizedBlocks = normalizeBlocksForApi(baseBlocks);
 
     return {
-      name: payloadName,
-      description: description.trim(),
-      tags: toTags(tagsInput),
       blocks: normalizedBlocks,
       graph: normalizedGraph,
-      proposalDefaults: {
-        titlePrefix: titlePrefix.trim(),
-        voteScope: proposalVoteScope,
-        state: proposalState,
-        holdUpSeconds: parseInteger(holdUpSeconds, 'Hold up seconds'),
-        votingDurationHours: parseInteger(votingDurationHours, 'Voting duration hours'),
-        autoExecute,
-        executeAfterHoldUp,
-        maxRiskScore: parseInteger(maxRiskScore, 'Max risk score'),
-      },
     };
   };
 
-  const handleSave = async (): Promise<void> => {
-    if (!selectedDao) {
-      setError('Select a DAO before saving a flow');
-      return;
-    }
-
-    setIsSaving(true);
-    setError(null);
-    setSuccess(null);
-
+  const persistDraft = async (requireAcyclic: boolean): Promise<{ blocks: FlowBlockInput[]; graph: FlowGraph } | null> => {
     try {
-      const payload = buildFlowPayload();
+      const payload = buildDraftPayload(requireAcyclic);
+      setIsAutoSaving(true);
 
-      const savedFlow =
-        activeFlowId === newFlowKey
-          ? await createFlow(
-              {
-                daoId: selectedDao.id,
-                ...payload,
-              },
-              accessToken,
-            )
-          : await updateFlow(
-              activeFlowId,
-              {
-                ...payload,
-                status,
-              },
-              accessToken,
-            );
+      await updateFlow(
+        flowId,
+        {
+          blocks: payload.blocks,
+          graph: payload.graph,
+        },
+        accessToken,
+      );
 
-      onFlowSaved(savedFlow);
-      setActiveFlowId(savedFlow.id);
-      setStatus(savedFlow.status);
-      hydrateFlowCanvas(savedFlow);
-      setSuccess(activeFlowId === newFlowKey ? 'Flow created successfully.' : 'Flow updated successfully.');
+      setIsDirty(false);
+      setLastSavedAt(new Date().toISOString());
+      onFlowSaved();
+      return payload;
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Unable to save flow');
+      setError(saveError instanceof Error ? saveError.message : 'Auto-save failed');
+      return null;
     } finally {
-      setIsSaving(false);
+      setIsAutoSaving(false);
     }
   };
 
+  useEffect(() => {
+    if (isHydrating || !isDirty || isPublishing || isCompiling) {
+      return;
+    }
+
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
+    }
+
+    autosaveTimerRef.current = window.setTimeout(() => {
+      void persistDraft(false);
+    }, 1200);
+
+    return () => {
+      if (autosaveTimerRef.current) {
+        window.clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDirty, blocks, graphNodes, graphEdges, isHydrating, isPublishing, isCompiling]);
+
   const handleCompile = async (): Promise<void> => {
-    setIsCompiling(true);
     setError(null);
     setSuccess(null);
+    setIsCompiling(true);
 
     try {
-      const payload = buildFlowPayload();
+      const payload = await persistDraft(true);
+
+      if (!payload) {
+        return;
+      }
+
       const contextRaw = compileContextJson.trim();
       const context = contextRaw ? parseJson<Record<string, unknown>>(contextRaw, 'Compile context') : {};
       const result = await compileInlineFlow(payload.blocks, context, accessToken);
 
       setCompileResult(result);
-      setSuccess('Compilation completed.');
+      setSuccess('Compile complete. You can now publish.');
     } catch (compileError) {
-      setError(compileError instanceof Error ? compileError.message : 'Unable to compile flow');
+      setError(compileError instanceof Error ? compileError.message : 'Compile failed');
     } finally {
       setIsCompiling(false);
     }
   };
 
   const handlePublish = async (): Promise<void> => {
-    if (activeFlowId === newFlowKey) {
-      setError('Save the flow before publishing it');
+    if (!compileResult) {
+      setError('Compile first, then publish.');
       return;
     }
 
-    setIsPublishing(true);
     setError(null);
     setSuccess(null);
+    setIsPublishing(true);
 
     try {
-      const payload = buildFlowPayload();
-      const syncedFlow = await updateFlow(
-        activeFlowId,
-        {
-          ...payload,
-          status,
-        },
-        accessToken,
-      );
+      const payload = await persistDraft(true);
 
-      onFlowSaved(syncedFlow);
-      hydrateFlowCanvas(syncedFlow);
+      if (!payload) {
+        return;
+      }
 
-      const contextRaw = compileContextJson.trim();
-      const context = contextRaw ? parseJson<Record<string, unknown>>(contextRaw, 'Compile context') : {};
-
-      const result = await publishFlow(
-        activeFlowId,
-        {
-          title: publishTitle.trim() || undefined,
-          description: publishDescription.trim() || undefined,
-          voteScope: publishVoteScope,
-          state: publishState,
-          holdUpSeconds: parseInteger(publishHoldUpSeconds, 'Publish hold up seconds'),
-          votingDurationHours: parseInteger(publishVotingDurationHours, 'Publish voting duration hours'),
-          automation: {
-            autoExecute: publishAutoExecute,
-            executeAfterHoldUp: publishExecuteAfterHoldUp,
-            maxRiskScore: parseInteger(publishMaxRiskScore, 'Publish max risk score'),
-          },
-          context,
-          onchainCreate: onchainCreateEnabled
-            ? {
-                enabled: true,
-                governanceProgramId: onchainGovernanceProgramId.trim() || undefined,
-                programVersion: parseInteger(onchainProgramVersion, 'Program version'),
-                realmAddress: onchainRealmAddress.trim(),
-                governanceAddress: onchainGovernanceAddress.trim(),
-                governingTokenMint: onchainGoverningTokenMint.trim(),
-                descriptionLink: onchainDescriptionLink.trim() || undefined,
-                optionIndex: parseInteger(onchainOptionIndex, 'Option index'),
-                useDenyOption: onchainUseDenyOption,
-                rpcUrl: onchainRpcUrl.trim() || undefined,
-                signOff: onchainSignOff,
-                requireSimulation: onchainRequireSimulation,
-              }
-            : undefined,
-        },
-        accessToken,
-      );
-
+      const result = await publishFlow(flowId, {}, accessToken);
       setLastPublishResult(result);
+      setSuccess('Flow published successfully.');
       onFlowPublished(result);
-      onFlowSaved(result.flow);
-      setStatus(result.flow.status);
-      hydrateFlowCanvas(result.flow);
+      onFlowSaved();
       setCompileResult(result.compilation);
-      setSuccess('Flow published and proposal created successfully.');
+      setLastSavedAt(new Date().toISOString());
     } catch (publishError) {
-      setError(publishError instanceof Error ? publishError.message : 'Unable to publish flow');
+      setError(publishError instanceof Error ? publishError.message : 'Publish failed');
     } finally {
       setIsPublishing(false);
     }
@@ -872,7 +656,6 @@ export const FlowEditor = ({
   const addBlock = (type: SupportedBlockType): void => {
     const nextBlock = defaultBlockForType(type);
     const nextBlockId = getString(nextBlock.id);
-    const previousBlockId = getString(blocks[blocks.length - 1]?.id);
 
     setBlocks((current) => [...current, nextBlock]);
     setGraphNodes((current) => {
@@ -880,15 +663,7 @@ export const FlowEditor = ({
       return [...current, { id: nextBlockId, x: position.x, y: position.y }];
     });
 
-    if (previousBlockId && nextBlockId) {
-      setGraphEdges((current) => {
-        if (current.some((edge) => edge.source === previousBlockId && edge.target === nextBlockId)) {
-          return current;
-        }
-
-        return [...current, { id: makeEdgeId(previousBlockId, nextBlockId, current.length), source: previousBlockId, target: nextBlockId }];
-      });
-    }
+    markDirty();
   };
 
   const removeBlock = (blockId: string): void => {
@@ -896,6 +671,7 @@ export const FlowEditor = ({
     setGraphNodes((current) => current.filter((node) => node.id !== blockId));
     setGraphEdges((current) => current.filter((edge) => edge.source !== blockId && edge.target !== blockId));
     setPendingLinkSourceId((current) => (current === blockId ? null : current));
+    markDirty();
   };
 
   const connectNodes = (sourceId: string, targetId: string): void => {
@@ -912,10 +688,12 @@ export const FlowEditor = ({
     });
 
     setPendingLinkSourceId(null);
+    markDirty();
   };
 
   const removeEdge = (edgeId: string): void => {
     setGraphEdges((current) => current.filter((edge) => edge.id !== edgeId));
+    markDirty();
   };
 
   const changeBlockType = (blockId: string, nextType: SupportedBlockType): void => {
@@ -933,6 +711,8 @@ export const FlowEditor = ({
         };
       }),
     );
+
+    markDirty();
   };
 
   const setBlockField = (blockId: string, field: string, value: unknown): void => {
@@ -948,6 +728,8 @@ export const FlowEditor = ({
         };
       }),
     );
+
+    markDirty();
   };
 
   const startNodeDrag = (event: ReactMouseEvent<HTMLButtonElement>, nodeId: string): void => {
@@ -1123,89 +905,25 @@ export const FlowEditor = ({
     );
   };
 
+  if (isLoadingFlow) {
+    return <p className="hint-text">Loading flow builder...</p>;
+  }
+
   return (
-    <section className="flow-workspace">
+    <section className="flow-builder-shell">
       <article className="flow-step-card">
         <header className="flow-step-head">
-          <span className="flow-step-index">Step 1</span>
+          <span className="flow-step-index">Builder</span>
           <div>
-            <h2>Pick Flow + Basic Details</h2>
-            <p>Choose an existing flow or start new, then set core metadata.</p>
+            <h2>{flowName}</h2>
+            <p>{flowDescription || 'No description'}</p>
           </div>
         </header>
 
-        <div className="form-grid two-col">
-          <label className="input-label">
-            Flow
-            <select
-              className="select-input"
-              value={activeFlowId}
-              onChange={(event) => {
-                const nextValue = event.target.value;
-
-                if (nextValue === newFlowKey) {
-                  resetForNewFlow();
-                  return;
-                }
-
-                void loadFlowIntoEditor(nextValue);
-              }}
-              disabled={isLoadingFlow || isSaving || isCompiling || isPublishing}
-            >
-              <option value={newFlowKey}>New flow</option>
-              {flowOptions.map((flow) => (
-                <option key={flow.id} value={flow.id}>
-                  {flow.name} ({flow.status})
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="input-label">
-            Status
-            <select
-              className="select-input"
-              value={status}
-              onChange={(event) => setStatus(event.target.value as 'draft' | 'published' | 'archived')}
-              disabled={activeFlowId === newFlowKey}
-            >
-              <option value="draft">draft</option>
-              <option value="published">published</option>
-              <option value="archived">archived</option>
-            </select>
-          </label>
+        <div className="flow-builder-status-row">
+          <span className="hint-text">{isAutoSaving ? 'Auto-saving...' : isDirty ? 'Unsaved changes' : 'Saved'}</span>
+          <span className="hint-text">{lastSavedAt ? `Last saved: ${formatDateTime(lastSavedAt)}` : 'Not saved yet'}</span>
         </div>
-
-        <div className="form-grid two-col">
-          <label className="input-label">
-            Name
-            <input className="text-input" value={name} onChange={(event) => setName(event.target.value)} />
-          </label>
-          <label className="input-label">
-            Tags (comma-separated)
-            <input className="text-input" value={tagsInput} onChange={(event) => setTagsInput(event.target.value)} />
-          </label>
-        </div>
-
-        <label className="input-label">
-          Description
-          <textarea
-            className="text-input textarea-input"
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            rows={3}
-          />
-        </label>
-      </article>
-
-      <article className="flow-step-card flow-step-card--canvas">
-        <header className="flow-step-head">
-          <span className="flow-step-index">Step 2</span>
-          <div>
-            <h2>Build Diagram</h2>
-            <p>Full-page canvas for drag, connect, and block configuration.</p>
-          </div>
-        </header>
 
         <div className="flow-palette">
           {supportedBlockTypes.map((typeItem) => (
@@ -1220,7 +938,6 @@ export const FlowEditor = ({
           ))}
         </div>
 
-        <p className="hint-text">Drag nodes by the handle. Click Start link on a source, then Link here on a target.</p>
         {orderingPreview.error ? <p className="error-text">{orderingPreview.error}</p> : null}
 
         <div className="flow-canvas-board" ref={canvasRef}>
@@ -1332,72 +1049,15 @@ export const FlowEditor = ({
 
       <article className="flow-step-card">
         <header className="flow-step-head">
-          <span className="flow-step-index">Step 3</span>
+          <span className="flow-step-index">Compile</span>
           <div>
-            <h2>Defaults + Compile</h2>
-            <p>Set proposal defaults, compile context, then save/compile.</p>
+            <h2>Compile Flow</h2>
+            <p>Compile validates block links and calculates risk.</p>
           </div>
         </header>
 
-        <div className="form-grid four-col">
-          <label className="input-label">
-            Title prefix
-            <input className="text-input" value={titlePrefix} onChange={(event) => setTitlePrefix(event.target.value)} />
-          </label>
-          <label className="input-label">
-            Vote scope
-            <select
-              className="select-input"
-              value={proposalVoteScope}
-              onChange={(event) => setProposalVoteScope(event.target.value as 'community' | 'council')}
-            >
-              <option value="community">community</option>
-              <option value="council">council</option>
-            </select>
-          </label>
-          <label className="input-label">
-            Proposal state
-            <select
-              className="select-input"
-              value={proposalState}
-              onChange={(event) => setProposalState(event.target.value as 'draft' | 'voting')}
-            >
-              <option value="draft">draft</option>
-              <option value="voting">voting</option>
-            </select>
-          </label>
-          <label className="input-label">
-            Hold up seconds
-            <input className="text-input" value={holdUpSeconds} onChange={(event) => setHoldUpSeconds(event.target.value)} />
-          </label>
-          <label className="input-label">
-            Voting duration hours
-            <input
-              className="text-input"
-              value={votingDurationHours}
-              onChange={(event) => setVotingDurationHours(event.target.value)}
-            />
-          </label>
-          <label className="input-label">
-            Max risk score
-            <input className="text-input" value={maxRiskScore} onChange={(event) => setMaxRiskScore(event.target.value)} />
-          </label>
-          <label className="checkbox-field">
-            <input type="checkbox" checked={autoExecute} onChange={(event) => setAutoExecute(event.target.checked)} />
-            Auto execute
-          </label>
-          <label className="checkbox-field">
-            <input
-              type="checkbox"
-              checked={executeAfterHoldUp}
-              onChange={(event) => setExecuteAfterHoldUp(event.target.checked)}
-            />
-            Execute after hold up
-          </label>
-        </div>
-
         <label className="input-label">
-          Context JSON
+          Context JSON (optional)
           <textarea
             className="text-input code-input"
             value={compileContextJson}
@@ -1407,224 +1067,11 @@ export const FlowEditor = ({
         </label>
 
         <div className="button-row">
-          <button type="button" className="secondary-button" onClick={resetForNewFlow}>
-            New flow
-          </button>
-          <button type="button" className="primary-button" onClick={() => void handleSave()} disabled={isSaving}>
-            {isSaving ? 'Saving...' : 'Save flow'}
-          </button>
-          <button type="button" className="secondary-button" onClick={() => void handleCompile()} disabled={isCompiling}>
-            {isCompiling ? 'Compiling...' : 'Compile flow'}
+          <button type="button" className="primary-button" onClick={() => void handleCompile()} disabled={isCompiling || isAutoSaving}>
+            {isCompiling ? 'Compiling...' : 'Compile'}
           </button>
         </div>
 
-        {error ? <p className="error-text">{error}</p> : null}
-        {success ? <p className="success-text">{success}</p> : null}
-        {selectedDao ? <p className="hint-text">DAO: {selectedDao.name}</p> : null}
-      </article>
-
-      <article className="flow-step-card">
-        <header className="flow-step-head">
-          <span className="flow-step-index">Step 4</span>
-          <div>
-            <h2>Publish Settings</h2>
-            <p>Configure final publish behavior and optional on-chain creation.</p>
-          </div>
-        </header>
-
-        <div className="form-grid two-col">
-          <label className="input-label">
-            Publish title (optional)
-            <input className="text-input" value={publishTitle} onChange={(event) => setPublishTitle(event.target.value)} />
-          </label>
-          <label className="input-label">
-            Publish description (optional)
-            <input
-              className="text-input"
-              value={publishDescription}
-              onChange={(event) => setPublishDescription(event.target.value)}
-            />
-          </label>
-          <label className="input-label">
-            Vote scope
-            <select
-              className="select-input"
-              value={publishVoteScope}
-              onChange={(event) => setPublishVoteScope(event.target.value as 'community' | 'council')}
-            >
-              <option value="community">community</option>
-              <option value="council">council</option>
-            </select>
-          </label>
-          <label className="input-label">
-            State
-            <select
-              className="select-input"
-              value={publishState}
-              onChange={(event) => setPublishState(event.target.value as 'draft' | 'voting')}
-            >
-              <option value="draft">draft</option>
-              <option value="voting">voting</option>
-            </select>
-          </label>
-          <label className="input-label">
-            Hold up seconds
-            <input
-              className="text-input"
-              value={publishHoldUpSeconds}
-              onChange={(event) => setPublishHoldUpSeconds(event.target.value)}
-            />
-          </label>
-          <label className="input-label">
-            Voting duration hours
-            <input
-              className="text-input"
-              value={publishVotingDurationHours}
-              onChange={(event) => setPublishVotingDurationHours(event.target.value)}
-            />
-          </label>
-          <label className="input-label">
-            Max risk score
-            <input
-              className="text-input"
-              value={publishMaxRiskScore}
-              onChange={(event) => setPublishMaxRiskScore(event.target.value)}
-            />
-          </label>
-          <label className="checkbox-field">
-            <input
-              type="checkbox"
-              checked={publishAutoExecute}
-              onChange={(event) => setPublishAutoExecute(event.target.checked)}
-            />
-            Auto execute
-          </label>
-          <label className="checkbox-field">
-            <input
-              type="checkbox"
-              checked={publishExecuteAfterHoldUp}
-              onChange={(event) => setPublishExecuteAfterHoldUp(event.target.checked)}
-            />
-            Execute after hold up
-          </label>
-        </div>
-
-        <label className="checkbox-field">
-          <input
-            type="checkbox"
-            checked={onchainCreateEnabled}
-            onChange={(event) => setOnchainCreateEnabled(event.target.checked)}
-          />
-          Create proposal on-chain during publish
-        </label>
-
-        {onchainCreateEnabled ? (
-          <div className="form-grid two-col">
-            <label className="input-label">
-              Governance program id
-              <input
-                className="text-input"
-                value={onchainGovernanceProgramId}
-                onChange={(event) => setOnchainGovernanceProgramId(event.target.value)}
-              />
-            </label>
-            <label className="input-label">
-              Program version
-              <input
-                className="text-input"
-                value={onchainProgramVersion}
-                onChange={(event) => setOnchainProgramVersion(event.target.value)}
-              />
-            </label>
-            <label className="input-label">
-              Realm address
-              <input
-                className="text-input"
-                value={onchainRealmAddress}
-                onChange={(event) => setOnchainRealmAddress(event.target.value)}
-              />
-            </label>
-            <label className="input-label">
-              Governance address
-              <input
-                className="text-input"
-                value={onchainGovernanceAddress}
-                onChange={(event) => setOnchainGovernanceAddress(event.target.value)}
-              />
-            </label>
-            <label className="input-label">
-              Governing token mint
-              <input
-                className="text-input"
-                value={onchainGoverningTokenMint}
-                onChange={(event) => setOnchainGoverningTokenMint(event.target.value)}
-              />
-            </label>
-            <label className="input-label">
-              Description link (optional)
-              <input
-                className="text-input"
-                value={onchainDescriptionLink}
-                onChange={(event) => setOnchainDescriptionLink(event.target.value)}
-              />
-            </label>
-            <label className="input-label">
-              Option index
-              <input
-                className="text-input"
-                value={onchainOptionIndex}
-                onChange={(event) => setOnchainOptionIndex(event.target.value)}
-              />
-            </label>
-            <label className="input-label">
-              RPC URL (optional)
-              <input className="text-input" value={onchainRpcUrl} onChange={(event) => setOnchainRpcUrl(event.target.value)} />
-            </label>
-            <label className="checkbox-field">
-              <input
-                type="checkbox"
-                checked={onchainUseDenyOption}
-                onChange={(event) => setOnchainUseDenyOption(event.target.checked)}
-              />
-              Use deny option
-            </label>
-            <label className="checkbox-field">
-              <input type="checkbox" checked={onchainSignOff} onChange={(event) => setOnchainSignOff(event.target.checked)} />
-              Sign off proposal
-            </label>
-            <label className="checkbox-field">
-              <input
-                type="checkbox"
-                checked={onchainRequireSimulation}
-                onChange={(event) => setOnchainRequireSimulation(event.target.checked)}
-              />
-              Require simulation
-            </label>
-          </div>
-        ) : null}
-
-        <div className="button-row">
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => void handlePublish()}
-            disabled={activeFlowId === newFlowKey || isPublishing}
-          >
-            {isPublishing ? 'Publishing...' : 'Publish flow'}
-          </button>
-        </div>
-      </article>
-
-      <article className="flow-step-card">
-        <header className="flow-step-head">
-          <span className="flow-step-index">Step 5</span>
-          <div>
-            <h2>Output</h2>
-            <p>View compile risk and latest publish details.</p>
-          </div>
-        </header>
-
-        <h3 className="subheading">Compilation Output</h3>
         {compileResult ? (
           <div className="result-shell">
             <p>
@@ -1642,10 +1089,32 @@ export const FlowEditor = ({
             )}
           </div>
         ) : (
-          <p className="hint-text">Compile to inspect risk score and generated instructions.</p>
+          <p className="hint-text">Compile before publishing.</p>
         )}
+      </article>
 
-        <h3 className="subheading">Last Publish Result</h3>
+      <article className="flow-step-card">
+        <header className="flow-step-head">
+          <span className="flow-step-index">Publish</span>
+          <div>
+            <h2>Publish Proposal</h2>
+            <p>Publish is unlocked only after a successful compile.</p>
+          </div>
+        </header>
+
+        <div className="button-row">
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => void handlePublish()}
+            disabled={!compileResult || isPublishing || isDirty || isAutoSaving}
+          >
+            {isPublishing ? 'Publishing...' : 'Publish'}
+          </button>
+        </div>
+
+        {isDirty ? <p className="hint-text">Waiting for auto-save before publish...</p> : null}
+
         {lastPublishResult ? (
           <div className="result-shell">
             <p>
@@ -1664,9 +1133,12 @@ export const FlowEditor = ({
             <p>Updated at: {formatDateTime(lastPublishResult.flow.updatedAt)}</p>
           </div>
         ) : (
-          <p className="hint-text">Publish a flow to create a proposal and capture output.</p>
+          <p className="hint-text">No publish action yet.</p>
         )}
       </article>
+
+      {error ? <p className="error-text">{error}</p> : null}
+      {success ? <p className="success-text">{success}</p> : null}
     </section>
   );
 };

@@ -1278,6 +1278,11 @@ p {
   padding-bottom: 1.05rem;
 }
 
+.flow-builder-shell {
+  display: grid;
+  gap: 0.9rem;
+}
+
 .flow-step-head {
   display: flex;
   align-items: flex-start;
@@ -1306,6 +1311,19 @@ p {
   padding: 0.36rem 0.48rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+.flow-open-action {
+  display: flex;
+  align-items: flex-end;
+}
+
+.flow-builder-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
 }
 
 .editor-header h2 {
@@ -1362,7 +1380,7 @@ p {
   background: var(--bg);
   position: relative;
   width: 100%;
-  height: calc(100vh - 220px);
+  height: 82vh;
   min-height: 760px;
   overflow: hidden;
 }
@@ -1617,12 +1635,21 @@ p {
   }
 
   .flow-canvas-board {
-    height: 72vh;
+    height: 70vh;
     min-height: 560px;
   }
 
   .flow-canvas-node {
     width: min(320px, calc(100vw - 4.2rem));
+  }
+
+  .flow-open-action {
+    align-items: stretch;
+  }
+
+  .flow-builder-status-row {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .form-grid.two-col,
