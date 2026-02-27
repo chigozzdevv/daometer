@@ -1350,6 +1350,35 @@ p {
   align-items: flex-end;
 }
 
+.flow-entry-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.flow-entry-tab {
+  border: var(--border);
+  background: var(--bg);
+  color: #555;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.48rem 0.68rem;
+  cursor: pointer;
+}
+
+.flow-entry-tab-active {
+  background: var(--yellow);
+  color: var(--black);
+  box-shadow: var(--shadow);
+}
+
+.flow-inline-input {
+  min-width: 220px;
+}
+
 .flow-builder-status-row {
   display: flex;
   align-items: center;
@@ -1705,6 +1734,11 @@ p {
 
   .flow-open-action {
     align-items: stretch;
+  }
+
+  .flow-inline-input {
+    min-width: 0;
+    width: 100%;
   }
 
   .flow-builder-status-row {

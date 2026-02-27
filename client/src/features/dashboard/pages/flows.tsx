@@ -31,6 +31,7 @@ const createDefaultFlowDraft = (): { blocks: Record<string, unknown>[]; graph: F
 };
 
 type FlowPageMode = 'idle' | 'details' | 'builder';
+type EntryMode = 'create' | 'open';
 
 export const DashboardFlowsPage = (): JSX.Element => {
   const { session } = useAuth();
@@ -42,6 +43,7 @@ export const DashboardFlowsPage = (): JSX.Element => {
 
   const [mode, setMode] = useState<FlowPageMode>('idle');
   const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
+  const [entryMode, setEntryMode] = useState<EntryMode>('create');
 
   const [detailsDaoId, setDetailsDaoId] = useState<string>('');
   const [detailsName, setDetailsName] = useState('');
@@ -72,6 +74,13 @@ export const DashboardFlowsPage = (): JSX.Element => {
       const items = await getFlows({ limit: 100 });
       setFlows(items);
       setOpenExistingFlowId((current) => current || items[0]?.id || '');
+      setEntryMode((current) => {
+        if (items.length === 0) {
+          return 'create';
+        }
+
+        return current;
+      });
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load flows');
       setFlows([]);
@@ -91,6 +100,20 @@ export const DashboardFlowsPage = (): JSX.Element => {
     () => flows.find((flow) => flow.id === activeFlowId) ?? null,
     [flows, activeFlowId],
   );
+  const alternateFlows = useMemo(
+    () => flows.filter((flow) => flow.id !== activeFlowId),
+    [flows, activeFlowId],
+  );
+
+  useEffect(() => {
+    if (alternateFlows.length === 0) {
+      return;
+    }
+
+    if (!openExistingFlowId || !alternateFlows.some((flow) => flow.id === openExistingFlowId)) {
+      setOpenExistingFlowId(alternateFlows[0].id);
+    }
+  }, [alternateFlows, openExistingFlowId]);
 
   const handleCreateFlow = async (): Promise<void> => {
     setError(null);
@@ -127,6 +150,7 @@ export const DashboardFlowsPage = (): JSX.Element => {
 
       await loadFlows();
       setActiveFlowId(created.id);
+      setOpenExistingFlowId(created.id);
       setMode('builder');
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : 'Unable to create flow');
@@ -151,24 +175,49 @@ export const DashboardFlowsPage = (): JSX.Element => {
             </div>
           </header>
 
-          <div className="button-row">
-            <button
-              type="button"
-              className="primary-button"
-              onClick={() => {
-                setDetailsName('');
-                setDetailsDescription('');
-                setMode('details');
-              }}
-            >
-              Create Flow
-            </button>
-          </div>
-
           {flows.length > 0 ? (
+            <div className="flow-entry-toggle" role="tablist" aria-label="Flow actions">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={entryMode === 'create'}
+                className={`flow-entry-tab ${entryMode === 'create' ? 'flow-entry-tab-active' : ''}`}
+                onClick={() => setEntryMode('create')}
+              >
+                Create New Flow
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={entryMode === 'open'}
+                className={`flow-entry-tab ${entryMode === 'open' ? 'flow-entry-tab-active' : ''}`}
+                onClick={() => setEntryMode('open')}
+              >
+                Open Existing Flow
+              </button>
+            </div>
+          ) : null}
+
+          {flows.length === 0 || entryMode === 'create' ? (
+            <div className="button-row">
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => {
+                  setDetailsName('');
+                  setDetailsDescription('');
+                  setMode('details');
+                }}
+              >
+                Create Flow
+              </button>
+            </div>
+          ) : null}
+
+          {flows.length > 0 && entryMode === 'open' ? (
             <div className="form-grid two-col">
               <label className="input-label">
-                Open existing flow
+                Existing flows
                 <select
                   className="select-input"
                   value={openExistingFlowId}
@@ -274,6 +323,48 @@ export const DashboardFlowsPage = (): JSX.Element => {
               >
                 Close Builder
               </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  setDetailsName('');
+                  setDetailsDescription('');
+                  setMode('details');
+                }}
+              >
+                Create Another Flow
+              </button>
+              {alternateFlows.length > 0 ? (
+                <>
+                  <label className="input-label flow-inline-input">
+                    Open existing
+                    <select
+                      className="select-input"
+                      value={openExistingFlowId}
+                      onChange={(event) => setOpenExistingFlowId(event.target.value)}
+                    >
+                      {alternateFlows.map((flow) => (
+                        <option key={flow.id} value={flow.id}>
+                          {flow.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      if (!openExistingFlowId || openExistingFlowId === activeFlowId) {
+                        return;
+                      }
+
+                      setActiveFlowId(openExistingFlowId);
+                    }}
+                  >
+                    Open
+                  </button>
+                </>
+              ) : null}
             </div>
           </article>
 
