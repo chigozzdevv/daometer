@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
 import BN from 'bn.js';
+import bs58 from 'bs58';
 import { PublicKey } from '@solana/web3.js';
 import { Connection, Transaction, type Commitment, type TransactionInstruction } from '@solana/web3.js';
 import { MintMaxVoteWeightSource, withCreateRealm } from '@realms-today/spl-governance';
@@ -116,6 +117,7 @@ export const prepareDaoOnchainCreate = async (
   input: PrepareDaoOnchainCreateInput,
   userId: Types.ObjectId,
 ): Promise<{
+  transactionMessage: string;
   transactionBase64: string;
   realmAddress: string;
   authorityWallet: string;
@@ -168,6 +170,7 @@ export const prepareDaoOnchainCreate = async (
   transaction.feePayer = feePayer;
   const latestBlockhash = await connection.getLatestBlockhash(env.SOLANA_COMMITMENT as Commitment);
   transaction.recentBlockhash = latestBlockhash.blockhash;
+  const transactionMessage = bs58.encode(transaction.serializeMessage());
   const transactionBase64 = transaction
     .serialize({
       requireAllSignatures: false,
@@ -176,6 +179,7 @@ export const prepareDaoOnchainCreate = async (
     .toString('base64');
 
   return {
+    transactionMessage,
     transactionBase64,
     realmAddress: realmAddress.toBase58(),
     authorityWallet: requestedAuthorityWallet,

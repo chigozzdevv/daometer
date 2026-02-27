@@ -86,13 +86,22 @@ const extractSignature = (result: unknown): string | null => {
   return null;
 };
 
-const sendPreparedTransaction = async (provider: SolanaProvider, transactionBase64: string): Promise<string> => {
-  const transactionBytes = base64ToBytes(transactionBase64);
-
-  if (typeof provider.signAndSendTransaction === 'function') {
+const sendPreparedTransaction = async (
+  provider: SolanaProvider,
+  transactionMessage: string,
+  transactionBase64: string,
+): Promise<string> => {
+  if (typeof provider.request === 'function') {
     try {
-      const result = await provider.signAndSendTransaction(transactionBytes, {
-        preflightCommitment: 'confirmed',
+      const result = await provider.request({
+        method: 'signAndSendTransaction',
+        params: {
+          message: transactionMessage,
+          options: {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed',
+          },
+        },
       });
       const signature = extractSignature(result);
 
@@ -100,18 +109,15 @@ const sendPreparedTransaction = async (provider: SolanaProvider, transactionBase
         return signature;
       }
     } catch {
-      // fallback to provider.request for wallets that only support the RPC-style API
+      // fallback to non-standard params used by some injected providers
     }
   }
 
-  if (typeof provider.request === 'function') {
+  if (typeof provider.signAndSendTransaction === 'function') {
     try {
-      const result = await provider.request({
-        method: 'signAndSendTransaction',
-        params: {
-          transaction: transactionBase64,
-          encoding: 'base64',
-        },
+      const transactionBytes = base64ToBytes(transactionBase64);
+      const result = await provider.signAndSendTransaction(transactionBytes, {
+        preflightCommitment: 'confirmed',
       });
       const signature = extractSignature(result);
 
@@ -285,7 +291,11 @@ export const DashboardDaosPage = (): JSX.Element => {
         throw new Error('Connected wallet must match authority wallet for non-custodial DAO creation.');
       }
 
-      const signature = await sendPreparedTransaction(provider, prepared.transactionBase64);
+      const signature = await sendPreparedTransaction(
+        provider,
+        prepared.transactionMessage,
+        prepared.transactionBase64,
+      );
       const createdDao = await createDao(
         {
           name: name.trim(),
