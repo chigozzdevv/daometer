@@ -7,6 +7,7 @@ export type DashboardNavItem = {
 export const navItems: DashboardNavItem[] = [
   { label: 'Overview', href: '/dashboard' },
   { label: 'DAOs', href: '/dashboard/daos' },
+  { label: 'Governance', href: '/dashboard/governance' },
   { label: 'Flows', href: '/dashboard/flows' },
   { label: 'Proposals', href: '/dashboard/proposals' },
   { label: 'Workflows', href: '/dashboard/workflows' },

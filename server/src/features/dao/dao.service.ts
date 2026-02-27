@@ -20,16 +20,20 @@ import {
   VoteThreshold,
   VoteThresholdType,
   VoteTipping,
+  withDepositGoverningTokens,
   withCreateGovernance,
   withCreateNativeTreasury,
   withCreateRealm,
   withCreateTokenOwnerRecord,
+  withSetGovernanceDelegate,
+  withWithdrawGoverningTokens,
 } from '@realms-today/spl-governance';
 import { env } from '@/config/env.config';
 import { UserModel } from '@/features/auth/auth.model';
 import { DaoModel, type DaoDocument } from '@/features/dao/dao.model';
 import { AppError } from '@/shared/errors/app-error';
 import { SOLANA_PROGRAM_IDS } from '@/config/solana.config';
+import { prepareUnsignedTransaction } from '@/shared/solana/prepared-transaction.util';
 import { toSlug } from '@/shared/utils/slug.util';
 import { assertCanManageDao } from '@/shared/utils/authorization.util';
 
@@ -98,6 +102,56 @@ type PrepareGovernanceCreateInput = {
   programVersion: number;
 };
 
+type PrepareMintDistributionInput = {
+  mintAddress: string;
+  recipientWallet: string;
+  amount: string;
+  decimals: number;
+  authorityWallet?: string;
+  payerWallet?: string;
+  createAssociatedTokenAccount: boolean;
+  rpcUrl?: string;
+};
+
+type PrepareMintAuthorityInput = {
+  mintAddress: string;
+  currentAuthorityWallet?: string;
+  newAuthorityWallet?: string | null;
+  rpcUrl?: string;
+};
+
+type PrepareVotingDepositInput = {
+  voteScope: 'community' | 'council';
+  governingTokenMint?: string;
+  amount: string;
+  decimals: number;
+  tokenSourceAccount?: string;
+  governingTokenOwnerWallet?: string;
+  payerWallet?: string;
+  rpcUrl?: string;
+  programVersion: number;
+};
+
+type PrepareVotingWithdrawInput = {
+  voteScope: 'community' | 'council';
+  governingTokenMint?: string;
+  destinationTokenAccount?: string;
+  governingTokenOwnerWallet?: string;
+  payerWallet?: string;
+  createDestinationAta: boolean;
+  rpcUrl?: string;
+  programVersion: number;
+};
+
+type PrepareVotingDelegateInput = {
+  voteScope: 'community' | 'council';
+  governingTokenMint?: string;
+  governingTokenOwnerWallet?: string;
+  newDelegateWallet?: string | null;
+  rpcUrl?: string;
+  programVersion: number;
+};
+
 type DaoGovernanceSummary = {
   address: string;
   governedAccount: string | null;
@@ -148,6 +202,122 @@ const buildMintSeed = (name: string): string => {
     .slice(0, 18);
   const suffix = randomBytes(4).toString('hex');
   return `dm${base}${suffix}`.slice(0, 32);
+};
+
+const maxU64 = (1n << 64n) - 1n;
+
+const toU64BaseUnits = (amount: string, decimals: number): bigint => {
+  if (!/^\d+(\.\d+)?$/.test(amount.trim())) {
+    throw new AppError('Amount is invalid', 400, 'DAO_TOKEN_AMOUNT_INVALID');
+  }
+
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 18) {
+    throw new AppError('Decimals must be between 0 and 18', 400, 'DAO_TOKEN_DECIMALS_INVALID');
+  }
+
+  const [wholePartRaw, fractionRaw = ''] = amount.trim().split('.');
+  const wholePart = wholePartRaw === '' ? '0' : wholePartRaw;
+
+  if (fractionRaw.length > decimals) {
+    throw new AppError(
+      'Amount has more fractional digits than decimals',
+      400,
+      'DAO_TOKEN_AMOUNT_PRECISION_INVALID',
+    );
+  }
+
+  const fractionPart = fractionRaw.padEnd(decimals, '0');
+  const base = 10n ** BigInt(decimals);
+  const units = BigInt(wholePart) * base + BigInt(fractionPart === '' ? '0' : fractionPart);
+
+  if (units <= 0n || units > maxU64) {
+    throw new AppError('Amount is out of range', 400, 'DAO_TOKEN_AMOUNT_RANGE_INVALID');
+  }
+
+  return units;
+};
+
+const deriveAssociatedTokenAddress = (
+  owner: PublicKey,
+  mint: PublicKey,
+  tokenProgramId = new PublicKey(SOLANA_PROGRAM_IDS.tokenProgram),
+  associatedTokenProgramId = new PublicKey(SOLANA_PROGRAM_IDS.associatedTokenProgram),
+): PublicKey =>
+  PublicKey.findProgramAddressSync(
+    [owner.toBuffer(), tokenProgramId.toBuffer(), mint.toBuffer()],
+    associatedTokenProgramId,
+  )[0];
+
+const createAssociatedTokenAccountInstruction = (input: {
+  payer: PublicKey;
+  owner: PublicKey;
+  mint: PublicKey;
+  associatedTokenAddress: PublicKey;
+  tokenProgramId?: PublicKey;
+  associatedTokenProgramId?: PublicKey;
+}): TransactionInstruction => {
+  const tokenProgramId = input.tokenProgramId ?? new PublicKey(SOLANA_PROGRAM_IDS.tokenProgram);
+  const associatedTokenProgramId =
+    input.associatedTokenProgramId ?? new PublicKey(SOLANA_PROGRAM_IDS.associatedTokenProgram);
+
+  return new TransactionInstruction({
+    programId: associatedTokenProgramId,
+    keys: [
+      { pubkey: input.payer, isSigner: true, isWritable: true },
+      { pubkey: input.associatedTokenAddress, isSigner: false, isWritable: true },
+      { pubkey: input.owner, isSigner: false, isWritable: false },
+      { pubkey: input.mint, isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: tokenProgramId, isSigner: false, isWritable: false },
+      { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
+    ],
+    data: Buffer.alloc(0),
+  });
+};
+
+const createMintToInstruction = (input: {
+  mint: PublicKey;
+  destination: PublicKey;
+  mintAuthority: PublicKey;
+  amountBaseUnits: bigint;
+}): TransactionInstruction => {
+  const data = Buffer.alloc(9);
+  data.writeUInt8(7, 0); // TokenInstruction::MintTo
+  data.writeBigUInt64LE(input.amountBaseUnits, 1);
+
+  return new TransactionInstruction({
+    programId: new PublicKey(SOLANA_PROGRAM_IDS.tokenProgram),
+    keys: [
+      { pubkey: input.mint, isSigner: false, isWritable: true },
+      { pubkey: input.destination, isSigner: false, isWritable: true },
+      { pubkey: input.mintAuthority, isSigner: true, isWritable: false },
+    ],
+    data,
+  });
+};
+
+const createSetMintAuthorityInstruction = (input: {
+  mint: PublicKey;
+  currentAuthority: PublicKey;
+  newAuthority: PublicKey | null;
+}): TransactionInstruction => {
+  const data = Buffer.alloc(input.newAuthority ? 35 : 3);
+  data.writeUInt8(6, 0); // TokenInstruction::SetAuthority
+  data.writeUInt8(0, 1); // AuthorityType::MintTokens
+  data.writeUInt8(input.newAuthority ? 1 : 0, 2);
+
+  if (input.newAuthority) {
+    input.newAuthority.toBuffer().copy(data, 3);
+  }
+
+  return new TransactionInstruction({
+    programId: new PublicKey(SOLANA_PROGRAM_IDS.tokenProgram),
+    keys: [
+      { pubkey: input.mint, isSigner: false, isWritable: true },
+      { pubkey: input.currentAuthority, isSigner: true, isWritable: false },
+    ],
+    data,
+  });
 };
 
 export const createDao = async (input: CreateDaoInput, userId: Types.ObjectId): Promise<DaoDocument> => {
@@ -578,6 +748,492 @@ export const prepareGovernanceCreate = async (
     recentBlockhash: latestBlockhash.blockhash,
     lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
     network: dao.network,
+  };
+};
+
+export const prepareMintDistribution = async (
+  daoId: string,
+  input: PrepareMintDistributionInput,
+  userId: Types.ObjectId,
+): Promise<{
+  transactionMessage: string;
+  transactionBase58: string;
+  transactionBase64: string;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
+  label: string;
+  authorityWallet: string;
+  payerWallet: string;
+  mintAddress: string;
+  recipientWallet: string;
+  recipientTokenAccount: string;
+  amount: string;
+  decimals: number;
+  network: 'mainnet-beta' | 'devnet';
+  rpcUrl: string;
+}> => {
+  const dao = await assertCanManageDao(daoId, userId);
+  const actor = await UserModel.findById(userId).select('walletAddress roles');
+
+  if (!actor?.walletAddress) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const actorWallet = normalizeAddress(actor.walletAddress, 'actor wallet');
+  const isAdmin = actor.roles.includes('admin');
+  const authorityWallet = normalizeAddress(input.authorityWallet ?? actorWallet, 'authority wallet');
+  const payerWallet = normalizeAddress(input.payerWallet ?? actorWallet, 'payer wallet');
+
+  if (!isAdmin && (authorityWallet !== actorWallet || payerWallet !== actorWallet)) {
+    throw new AppError(
+      'Authority wallet and payer wallet must match your connected wallet',
+      403,
+      'DAO_AUTHORITY_WALLET_MISMATCH',
+    );
+  }
+
+  const mintAddress = normalizeAddress(input.mintAddress, 'mint address');
+  const recipientWallet = normalizeAddress(input.recipientWallet, 'recipient wallet');
+  const mintPk = new PublicKey(mintAddress);
+  const recipientPk = new PublicKey(recipientWallet);
+  const payerPk = new PublicKey(payerWallet);
+  const authorityPk = new PublicKey(authorityWallet);
+  const recipientTokenAccount = deriveAssociatedTokenAddress(recipientPk, mintPk);
+  const amountBaseUnits = toU64BaseUnits(input.amount, input.decimals);
+  const rpcUrl = input.rpcUrl ?? defaultRpcByNetwork[dao.network];
+  const connection = new Connection(rpcUrl, { commitment: env.SOLANA_COMMITMENT as Commitment });
+  const instructions: TransactionInstruction[] = [];
+
+  if (input.createAssociatedTokenAccount) {
+    const destinationAtaInfo = await connection.getAccountInfo(recipientTokenAccount, env.SOLANA_COMMITMENT as Commitment);
+
+    if (!destinationAtaInfo) {
+      instructions.push(
+        createAssociatedTokenAccountInstruction({
+          payer: payerPk,
+          owner: recipientPk,
+          mint: mintPk,
+          associatedTokenAddress: recipientTokenAccount,
+        }),
+      );
+    }
+  }
+
+  instructions.push(
+    createMintToInstruction({
+      mint: mintPk,
+      destination: recipientTokenAccount,
+      mintAuthority: authorityPk,
+      amountBaseUnits,
+    }),
+  );
+
+  const prepared = await prepareUnsignedTransaction({
+    connection,
+    instructions,
+    feePayer: payerPk,
+    label: 'mint-distribution',
+  });
+
+  return {
+    ...prepared,
+    authorityWallet,
+    payerWallet,
+    mintAddress,
+    recipientWallet,
+    recipientTokenAccount: recipientTokenAccount.toBase58(),
+    amount: input.amount,
+    decimals: input.decimals,
+    network: dao.network,
+    rpcUrl,
+  };
+};
+
+export const prepareMintAuthorityUpdate = async (
+  daoId: string,
+  input: PrepareMintAuthorityInput,
+  userId: Types.ObjectId,
+): Promise<{
+  transactionMessage: string;
+  transactionBase58: string;
+  transactionBase64: string;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
+  label: string;
+  currentAuthorityWallet: string;
+  mintAddress: string;
+  newAuthorityWallet: string | null;
+  network: 'mainnet-beta' | 'devnet';
+  rpcUrl: string;
+}> => {
+  const dao = await assertCanManageDao(daoId, userId);
+  const actor = await UserModel.findById(userId).select('walletAddress');
+
+  if (!actor?.walletAddress) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const actorWallet = normalizeAddress(actor.walletAddress, 'actor wallet');
+  const currentAuthorityWallet = normalizeAddress(input.currentAuthorityWallet ?? actorWallet, 'current authority wallet');
+
+  if (currentAuthorityWallet !== actorWallet) {
+    throw new AppError(
+      'Current authority wallet must match your connected wallet',
+      403,
+      'DAO_AUTHORITY_WALLET_MISMATCH',
+    );
+  }
+
+  const mintAddress = normalizeAddress(input.mintAddress, 'mint address');
+  const mintPk = new PublicKey(mintAddress);
+  const currentAuthorityPk = new PublicKey(currentAuthorityWallet);
+  const newAuthorityPk = input.newAuthorityWallet ? new PublicKey(normalizeAddress(input.newAuthorityWallet, 'new authority wallet')) : null;
+  const rpcUrl = input.rpcUrl ?? defaultRpcByNetwork[dao.network];
+  const connection = new Connection(rpcUrl, { commitment: env.SOLANA_COMMITMENT as Commitment });
+
+  const prepared = await prepareUnsignedTransaction({
+    connection,
+    instructions: [
+      createSetMintAuthorityInstruction({
+        mint: mintPk,
+        currentAuthority: currentAuthorityPk,
+        newAuthority: newAuthorityPk,
+      }),
+    ],
+    feePayer: currentAuthorityPk,
+    label: 'set-mint-authority',
+  });
+
+  return {
+    ...prepared,
+    currentAuthorityWallet,
+    mintAddress,
+    newAuthorityWallet: newAuthorityPk ? newAuthorityPk.toBase58() : null,
+    network: dao.network,
+    rpcUrl,
+  };
+};
+
+export const prepareVotingDeposit = async (
+  daoId: string,
+  input: PrepareVotingDepositInput,
+  userId: Types.ObjectId,
+): Promise<{
+  transactionMessage: string;
+  transactionBase58: string;
+  transactionBase64: string;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
+  label: string;
+  governingTokenMint: string;
+  tokenOwnerRecordAddress: string;
+  governingTokenOwnerWallet: string;
+  tokenSourceAccount: string;
+  amount: string;
+  decimals: number;
+  network: 'mainnet-beta' | 'devnet';
+  rpcUrl: string;
+}> => {
+  const dao = await assertCanManageDao(daoId, userId);
+  const actor = await UserModel.findById(userId).select('walletAddress');
+
+  if (!actor?.walletAddress) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const actorWallet = normalizeAddress(actor.walletAddress, 'actor wallet');
+  const governingTokenOwnerWallet = normalizeAddress(
+    input.governingTokenOwnerWallet ?? actorWallet,
+    'governing token owner wallet',
+  );
+  const payerWallet = normalizeAddress(input.payerWallet ?? actorWallet, 'payer wallet');
+
+  if (governingTokenOwnerWallet !== actorWallet || payerWallet !== actorWallet) {
+    throw new AppError(
+      'Governing token owner wallet and payer wallet must match your connected wallet',
+      403,
+      'DAO_AUTHORITY_WALLET_MISMATCH',
+    );
+  }
+
+  const fallbackMint =
+    input.voteScope === 'council'
+      ? dao.councilMint
+      : dao.communityMint;
+  const governingTokenMint = input.governingTokenMint
+    ? normalizeAddress(input.governingTokenMint, 'governing token mint')
+    : fallbackMint;
+
+  if (!governingTokenMint) {
+    throw new AppError(
+      input.voteScope === 'council'
+        ? 'Council mint is missing for this DAO.'
+        : 'Community mint is missing for this DAO.',
+      400,
+      'DAO_GOVERNING_TOKEN_MINT_MISSING',
+    );
+  }
+
+  const programId = new PublicKey(dao.governanceProgramId);
+  const realmPk = new PublicKey(dao.realmAddress);
+  const governingTokenMintPk = new PublicKey(governingTokenMint);
+  const governingTokenOwnerPk = new PublicKey(governingTokenOwnerWallet);
+  const payerPk = new PublicKey(payerWallet);
+  const tokenSourcePk = input.tokenSourceAccount
+    ? new PublicKey(normalizeAddress(input.tokenSourceAccount, 'token source account'))
+    : deriveAssociatedTokenAddress(governingTokenOwnerPk, governingTokenMintPk);
+  const rpcUrl = input.rpcUrl ?? defaultRpcByNetwork[dao.network];
+  const connection = new Connection(rpcUrl, { commitment: env.SOLANA_COMMITMENT as Commitment });
+  const tokenSourceInfo = await connection.getAccountInfo(tokenSourcePk, env.SOLANA_COMMITMENT as Commitment);
+
+  if (!tokenSourceInfo) {
+    throw new AppError(
+      'Source token account was not found. Mint/distribute governance tokens first.',
+      400,
+      'DAO_TOKEN_SOURCE_ACCOUNT_MISSING',
+    );
+  }
+
+  const amountBaseUnits = toU64BaseUnits(input.amount, input.decimals);
+  const instructions: TransactionInstruction[] = [];
+
+  const tokenOwnerRecordAddress = await withDepositGoverningTokens(
+    instructions,
+    programId,
+    input.programVersion,
+    realmPk,
+    tokenSourcePk,
+    governingTokenMintPk,
+    governingTokenOwnerPk,
+    governingTokenOwnerPk,
+    payerPk,
+    new BN(amountBaseUnits.toString()),
+  );
+
+  const prepared = await prepareUnsignedTransaction({
+    connection,
+    instructions,
+    feePayer: payerPk,
+    label: 'deposit-governing-tokens',
+  });
+
+  return {
+    ...prepared,
+    governingTokenMint,
+    tokenOwnerRecordAddress: tokenOwnerRecordAddress.toBase58(),
+    governingTokenOwnerWallet,
+    tokenSourceAccount: tokenSourcePk.toBase58(),
+    amount: input.amount,
+    decimals: input.decimals,
+    network: dao.network,
+    rpcUrl,
+  };
+};
+
+export const prepareVotingWithdraw = async (
+  daoId: string,
+  input: PrepareVotingWithdrawInput,
+  userId: Types.ObjectId,
+): Promise<{
+  transactionMessage: string;
+  transactionBase58: string;
+  transactionBase64: string;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
+  label: string;
+  governingTokenMint: string;
+  governingTokenOwnerWallet: string;
+  destinationTokenAccount: string;
+  network: 'mainnet-beta' | 'devnet';
+  rpcUrl: string;
+}> => {
+  const dao = await assertCanManageDao(daoId, userId);
+  const actor = await UserModel.findById(userId).select('walletAddress');
+
+  if (!actor?.walletAddress) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const actorWallet = normalizeAddress(actor.walletAddress, 'actor wallet');
+  const governingTokenOwnerWallet = normalizeAddress(
+    input.governingTokenOwnerWallet ?? actorWallet,
+    'governing token owner wallet',
+  );
+  const payerWallet = normalizeAddress(input.payerWallet ?? actorWallet, 'payer wallet');
+
+  if (governingTokenOwnerWallet !== actorWallet || payerWallet !== actorWallet) {
+    throw new AppError(
+      'Governing token owner wallet and payer wallet must match your connected wallet',
+      403,
+      'DAO_AUTHORITY_WALLET_MISMATCH',
+    );
+  }
+
+  const fallbackMint =
+    input.voteScope === 'council'
+      ? dao.councilMint
+      : dao.communityMint;
+  const governingTokenMint = input.governingTokenMint
+    ? normalizeAddress(input.governingTokenMint, 'governing token mint')
+    : fallbackMint;
+
+  if (!governingTokenMint) {
+    throw new AppError(
+      input.voteScope === 'council'
+        ? 'Council mint is missing for this DAO.'
+        : 'Community mint is missing for this DAO.',
+      400,
+      'DAO_GOVERNING_TOKEN_MINT_MISSING',
+    );
+  }
+
+  const programId = new PublicKey(dao.governanceProgramId);
+  const realmPk = new PublicKey(dao.realmAddress);
+  const governingTokenMintPk = new PublicKey(governingTokenMint);
+  const governingTokenOwnerPk = new PublicKey(governingTokenOwnerWallet);
+  const payerPk = new PublicKey(payerWallet);
+  const destinationTokenAccount = input.destinationTokenAccount
+    ? new PublicKey(normalizeAddress(input.destinationTokenAccount, 'destination token account'))
+    : deriveAssociatedTokenAddress(governingTokenOwnerPk, governingTokenMintPk);
+  const rpcUrl = input.rpcUrl ?? defaultRpcByNetwork[dao.network];
+  const connection = new Connection(rpcUrl, { commitment: env.SOLANA_COMMITMENT as Commitment });
+  const instructions: TransactionInstruction[] = [];
+
+  if (input.createDestinationAta) {
+    const destinationInfo = await connection.getAccountInfo(destinationTokenAccount, env.SOLANA_COMMITMENT as Commitment);
+
+    if (!destinationInfo) {
+      instructions.push(
+        createAssociatedTokenAccountInstruction({
+          payer: payerPk,
+          owner: governingTokenOwnerPk,
+          mint: governingTokenMintPk,
+          associatedTokenAddress: destinationTokenAccount,
+        }),
+      );
+    }
+  }
+
+  await withWithdrawGoverningTokens(
+    instructions,
+    programId,
+    input.programVersion,
+    realmPk,
+    destinationTokenAccount,
+    governingTokenMintPk,
+    governingTokenOwnerPk,
+  );
+
+  const prepared = await prepareUnsignedTransaction({
+    connection,
+    instructions,
+    feePayer: payerPk,
+    label: 'withdraw-governing-tokens',
+  });
+
+  return {
+    ...prepared,
+    governingTokenMint,
+    governingTokenOwnerWallet,
+    destinationTokenAccount: destinationTokenAccount.toBase58(),
+    network: dao.network,
+    rpcUrl,
+  };
+};
+
+export const prepareVotingDelegate = async (
+  daoId: string,
+  input: PrepareVotingDelegateInput,
+  userId: Types.ObjectId,
+): Promise<{
+  transactionMessage: string;
+  transactionBase58: string;
+  transactionBase64: string;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
+  label: string;
+  governingTokenMint: string;
+  governingTokenOwnerWallet: string;
+  newDelegateWallet: string | null;
+  network: 'mainnet-beta' | 'devnet';
+  rpcUrl: string;
+}> => {
+  const dao = await assertCanManageDao(daoId, userId);
+  const actor = await UserModel.findById(userId).select('walletAddress');
+
+  if (!actor?.walletAddress) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const actorWallet = normalizeAddress(actor.walletAddress, 'actor wallet');
+  const governingTokenOwnerWallet = normalizeAddress(
+    input.governingTokenOwnerWallet ?? actorWallet,
+    'governing token owner wallet',
+  );
+
+  if (governingTokenOwnerWallet !== actorWallet) {
+    throw new AppError(
+      'Governing token owner wallet must match your connected wallet',
+      403,
+      'DAO_AUTHORITY_WALLET_MISMATCH',
+    );
+  }
+
+  const fallbackMint =
+    input.voteScope === 'council'
+      ? dao.councilMint
+      : dao.communityMint;
+  const governingTokenMint = input.governingTokenMint
+    ? normalizeAddress(input.governingTokenMint, 'governing token mint')
+    : fallbackMint;
+
+  if (!governingTokenMint) {
+    throw new AppError(
+      input.voteScope === 'council'
+        ? 'Council mint is missing for this DAO.'
+        : 'Community mint is missing for this DAO.',
+      400,
+      'DAO_GOVERNING_TOKEN_MINT_MISSING',
+    );
+  }
+
+  const programId = new PublicKey(dao.governanceProgramId);
+  const realmPk = new PublicKey(dao.realmAddress);
+  const governingTokenMintPk = new PublicKey(governingTokenMint);
+  const governingTokenOwnerPk = new PublicKey(governingTokenOwnerWallet);
+  const newDelegateWallet = input.newDelegateWallet
+    ? normalizeAddress(input.newDelegateWallet, 'new delegate wallet')
+    : null;
+  const newDelegatePk = newDelegateWallet ? new PublicKey(newDelegateWallet) : undefined;
+  const rpcUrl = input.rpcUrl ?? defaultRpcByNetwork[dao.network];
+  const connection = new Connection(rpcUrl, { commitment: env.SOLANA_COMMITMENT as Commitment });
+  const instructions: TransactionInstruction[] = [];
+
+  await withSetGovernanceDelegate(
+    instructions,
+    programId,
+    input.programVersion,
+    realmPk,
+    governingTokenMintPk,
+    governingTokenOwnerPk,
+    governingTokenOwnerPk,
+    newDelegatePk,
+  );
+
+  const prepared = await prepareUnsignedTransaction({
+    connection,
+    instructions,
+    feePayer: governingTokenOwnerPk,
+    label: 'set-governance-delegate',
+  });
+
+  return {
+    ...prepared,
+    governingTokenMint,
+    governingTokenOwnerWallet,
+    newDelegateWallet,
+    network: dao.network,
+    rpcUrl,
   };
 };
 

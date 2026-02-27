@@ -6,9 +6,14 @@ import {
   getDaoById,
   listDaoGovernances,
   listDaos,
+  prepareMintAuthorityUpdate,
+  prepareMintDistribution,
   prepareGovernanceCreate,
   prepareCommunityMintCreate,
   prepareDaoOnchainCreate,
+  prepareVotingDelegate,
+  prepareVotingDeposit,
+  prepareVotingWithdraw,
   updateDao,
 } from '@/features/dao/dao.service';
 
@@ -58,6 +63,76 @@ export const prepareGovernance = asyncHandler(async (req: Request, res: Response
 
   const { daoId } = req.params as { daoId: string };
   const result = await prepareGovernanceCreate(daoId, req.body, req.authUser.userId);
+
+  res.status(201).json({
+    success: true,
+    data: result,
+  });
+});
+
+export const prepareMintDistributionTx = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.authUser) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const { daoId } = req.params as { daoId: string };
+  const result = await prepareMintDistribution(daoId, req.body, req.authUser.userId);
+
+  res.status(201).json({
+    success: true,
+    data: result,
+  });
+});
+
+export const prepareMintAuthorityTx = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.authUser) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const { daoId } = req.params as { daoId: string };
+  const result = await prepareMintAuthorityUpdate(daoId, req.body, req.authUser.userId);
+
+  res.status(201).json({
+    success: true,
+    data: result,
+  });
+});
+
+export const prepareVotingDepositTx = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.authUser) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const { daoId } = req.params as { daoId: string };
+  const result = await prepareVotingDeposit(daoId, req.body, req.authUser.userId);
+
+  res.status(201).json({
+    success: true,
+    data: result,
+  });
+});
+
+export const prepareVotingWithdrawTx = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.authUser) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const { daoId } = req.params as { daoId: string };
+  const result = await prepareVotingWithdraw(daoId, req.body, req.authUser.userId);
+
+  res.status(201).json({
+    success: true,
+    data: result,
+  });
+});
+
+export const prepareVotingDelegateTx = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.authUser) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const { daoId } = req.params as { daoId: string };
+  const result = await prepareVotingDelegate(daoId, req.body, req.authUser.userId);
 
   res.status(201).json({
     success: true,

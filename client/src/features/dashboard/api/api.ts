@@ -142,6 +142,104 @@ export type PrepareDaoGovernanceResult = {
   network: 'mainnet-beta' | 'devnet';
 };
 
+export type PreparedWalletTransactionResult = {
+  label: string;
+  transactionMessage: string;
+  transactionBase58: string;
+  transactionBase64: string;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
+  network: 'mainnet-beta' | 'devnet';
+  rpcUrl: string;
+};
+
+export type PrepareMintDistributionInput = {
+  mintAddress: string;
+  recipientWallet: string;
+  amount: string;
+  decimals: number;
+  authorityWallet?: string;
+  payerWallet?: string;
+  createAssociatedTokenAccount?: boolean;
+  rpcUrl?: string;
+};
+
+export type PrepareMintDistributionResult = PreparedWalletTransactionResult & {
+  authorityWallet: string;
+  payerWallet: string;
+  mintAddress: string;
+  recipientWallet: string;
+  recipientTokenAccount: string;
+  amount: string;
+  decimals: number;
+};
+
+export type PrepareMintAuthorityInput = {
+  mintAddress: string;
+  currentAuthorityWallet?: string;
+  newAuthorityWallet?: string | null;
+  rpcUrl?: string;
+};
+
+export type PrepareMintAuthorityResult = PreparedWalletTransactionResult & {
+  currentAuthorityWallet: string;
+  mintAddress: string;
+  newAuthorityWallet: string | null;
+};
+
+export type PrepareVotingDepositInput = {
+  voteScope?: 'community' | 'council';
+  governingTokenMint?: string;
+  amount: string;
+  decimals: number;
+  tokenSourceAccount?: string;
+  governingTokenOwnerWallet?: string;
+  payerWallet?: string;
+  rpcUrl?: string;
+  programVersion?: number;
+};
+
+export type PrepareVotingDepositResult = PreparedWalletTransactionResult & {
+  governingTokenMint: string;
+  tokenOwnerRecordAddress: string;
+  governingTokenOwnerWallet: string;
+  tokenSourceAccount: string;
+  amount: string;
+  decimals: number;
+};
+
+export type PrepareVotingWithdrawInput = {
+  voteScope?: 'community' | 'council';
+  governingTokenMint?: string;
+  destinationTokenAccount?: string;
+  governingTokenOwnerWallet?: string;
+  payerWallet?: string;
+  createDestinationAta?: boolean;
+  rpcUrl?: string;
+  programVersion?: number;
+};
+
+export type PrepareVotingWithdrawResult = PreparedWalletTransactionResult & {
+  governingTokenMint: string;
+  governingTokenOwnerWallet: string;
+  destinationTokenAccount: string;
+};
+
+export type PrepareVotingDelegateInput = {
+  voteScope?: 'community' | 'council';
+  governingTokenMint?: string;
+  governingTokenOwnerWallet?: string;
+  newDelegateWallet?: string | null;
+  rpcUrl?: string;
+  programVersion?: number;
+};
+
+export type PrepareVotingDelegateResult = PreparedWalletTransactionResult & {
+  governingTokenMint: string;
+  governingTokenOwnerWallet: string;
+  newDelegateWallet: string | null;
+};
+
 export type FlowItem = {
   id: string;
   daoId: string;
@@ -560,6 +658,61 @@ export const prepareDaoGovernanceCreate = async (
   apiRequest<PrepareDaoGovernanceResult>(`/daos/${daoId}/prepare-governance`, {
     method: 'POST',
     body: input,
+    accessToken,
+  });
+
+export const prepareMintDistributionTx = async (
+  daoId: string,
+  input: PrepareMintDistributionInput,
+  accessToken: string,
+): Promise<PrepareMintDistributionResult> =>
+  apiRequest<PrepareMintDistributionResult>(`/daos/${daoId}/prepare-mint-distribution`, {
+    method: 'POST',
+    body: input as unknown as Record<string, unknown>,
+    accessToken,
+  });
+
+export const prepareMintAuthorityTx = async (
+  daoId: string,
+  input: PrepareMintAuthorityInput,
+  accessToken: string,
+): Promise<PrepareMintAuthorityResult> =>
+  apiRequest<PrepareMintAuthorityResult>(`/daos/${daoId}/prepare-mint-authority`, {
+    method: 'POST',
+    body: input as unknown as Record<string, unknown>,
+    accessToken,
+  });
+
+export const prepareVotingDepositTx = async (
+  daoId: string,
+  input: PrepareVotingDepositInput,
+  accessToken: string,
+): Promise<PrepareVotingDepositResult> =>
+  apiRequest<PrepareVotingDepositResult>(`/daos/${daoId}/prepare-voting-deposit`, {
+    method: 'POST',
+    body: input as unknown as Record<string, unknown>,
+    accessToken,
+  });
+
+export const prepareVotingWithdrawTx = async (
+  daoId: string,
+  input: PrepareVotingWithdrawInput,
+  accessToken: string,
+): Promise<PrepareVotingWithdrawResult> =>
+  apiRequest<PrepareVotingWithdrawResult>(`/daos/${daoId}/prepare-voting-withdraw`, {
+    method: 'POST',
+    body: input as unknown as Record<string, unknown>,
+    accessToken,
+  });
+
+export const prepareVotingDelegateTx = async (
+  daoId: string,
+  input: PrepareVotingDelegateInput,
+  accessToken: string,
+): Promise<PrepareVotingDelegateResult> =>
+  apiRequest<PrepareVotingDelegateResult>(`/daos/${daoId}/prepare-voting-delegate`, {
+    method: 'POST',
+    body: input as unknown as Record<string, unknown>,
     accessToken,
   });
 

@@ -6,6 +6,7 @@ import { AuthPage } from '@/features/auth/pages/auth';
 import { DashboardDaosPage } from '@/features/dashboard/pages/daos';
 import { DashboardExecutionPage } from '@/features/dashboard/pages/execution';
 import { DashboardFlowsPage } from '@/features/dashboard/pages/flows';
+import { DashboardGovernancePage } from '@/features/dashboard/pages/governance';
 import { DashboardNotificationsPage } from '@/features/dashboard/pages/notifications';
 import { DashboardOverviewPage } from '@/features/dashboard/pages/overview';
 import { DashboardProposalsPage } from '@/features/dashboard/pages/proposals';
@@ -25,6 +26,7 @@ export const AppRouter = (): JSX.Element => (
       <Route element={<DashboardLayout />}>
         <Route path="/dashboard" element={<DashboardOverviewPage />} />
         <Route path="/dashboard/daos" element={<DashboardDaosPage />} />
+        <Route path="/dashboard/governance" element={<DashboardGovernancePage />} />
         <Route path="/dashboard/proposals" element={<DashboardProposalsPage />} />
         <Route path="/dashboard/flows" element={<DashboardFlowsPage />} />
         <Route path="/dashboard/workflows" element={<DashboardWorkflowsPage />} />

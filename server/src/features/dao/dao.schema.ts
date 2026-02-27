@@ -130,3 +130,83 @@ export const listDaoSchema = z.object({
     search: z.string().trim().max(120).optional(),
   }),
 });
+
+export const prepareMintDistributionSchema = z.object({
+  body: z.object({
+    mintAddress: z.string().trim().regex(base58Regex, 'Invalid mint address'),
+    recipientWallet: z.string().trim().regex(base58Regex, 'Invalid recipient wallet'),
+    amount: z.string().trim().regex(/^\d+(\.\d+)?$/),
+    decimals: z.number().int().min(0).max(12).default(6),
+    authorityWallet: z.string().trim().regex(base58Regex, 'Invalid authority wallet').optional(),
+    payerWallet: z.string().trim().regex(base58Regex, 'Invalid payer wallet').optional(),
+    createAssociatedTokenAccount: z.boolean().default(true),
+    rpcUrl: z.string().trim().url().optional(),
+  }),
+  params: z.object({
+    daoId: z.string().trim().length(24),
+  }),
+  query: emptyObject,
+});
+
+export const prepareMintAuthoritySchema = z.object({
+  body: z.object({
+    mintAddress: z.string().trim().regex(base58Regex, 'Invalid mint address'),
+    currentAuthorityWallet: z.string().trim().regex(base58Regex, 'Invalid current authority wallet').optional(),
+    newAuthorityWallet: z.union([z.string().trim().regex(base58Regex, 'Invalid new authority wallet'), z.null()]).optional(),
+    rpcUrl: z.string().trim().url().optional(),
+  }),
+  params: z.object({
+    daoId: z.string().trim().length(24),
+  }),
+  query: emptyObject,
+});
+
+export const prepareVotingDepositSchema = z.object({
+  body: z.object({
+    voteScope: z.enum(['community', 'council']).default('community'),
+    governingTokenMint: z.string().trim().regex(base58Regex, 'Invalid governing token mint').optional(),
+    amount: z.string().trim().regex(/^\d+(\.\d+)?$/),
+    decimals: z.number().int().min(0).max(12).default(6),
+    tokenSourceAccount: z.string().trim().regex(base58Regex, 'Invalid token source account').optional(),
+    governingTokenOwnerWallet: z.string().trim().regex(base58Regex, 'Invalid governing token owner wallet').optional(),
+    payerWallet: z.string().trim().regex(base58Regex, 'Invalid payer wallet').optional(),
+    rpcUrl: z.string().trim().url().optional(),
+    programVersion: z.number().int().min(1).max(10).default(3),
+  }),
+  params: z.object({
+    daoId: z.string().trim().length(24),
+  }),
+  query: emptyObject,
+});
+
+export const prepareVotingWithdrawSchema = z.object({
+  body: z.object({
+    voteScope: z.enum(['community', 'council']).default('community'),
+    governingTokenMint: z.string().trim().regex(base58Regex, 'Invalid governing token mint').optional(),
+    destinationTokenAccount: z.string().trim().regex(base58Regex, 'Invalid destination token account').optional(),
+    governingTokenOwnerWallet: z.string().trim().regex(base58Regex, 'Invalid governing token owner wallet').optional(),
+    payerWallet: z.string().trim().regex(base58Regex, 'Invalid payer wallet').optional(),
+    createDestinationAta: z.boolean().default(true),
+    rpcUrl: z.string().trim().url().optional(),
+    programVersion: z.number().int().min(1).max(10).default(3),
+  }),
+  params: z.object({
+    daoId: z.string().trim().length(24),
+  }),
+  query: emptyObject,
+});
+
+export const prepareVotingDelegateSchema = z.object({
+  body: z.object({
+    voteScope: z.enum(['community', 'council']).default('community'),
+    governingTokenMint: z.string().trim().regex(base58Regex, 'Invalid governing token mint').optional(),
+    governingTokenOwnerWallet: z.string().trim().regex(base58Regex, 'Invalid governing token owner wallet').optional(),
+    newDelegateWallet: z.union([z.string().trim().regex(base58Regex, 'Invalid delegate wallet'), z.null()]).optional(),
+    rpcUrl: z.string().trim().url().optional(),
+    programVersion: z.number().int().min(1).max(10).default(3),
+  }),
+  params: z.object({
+    daoId: z.string().trim().length(24),
+  }),
+  query: emptyObject,
+});
