@@ -291,6 +291,7 @@ export const DashboardDaosPage = (): JSX.Element => {
   const { session } = useAuth();
   const [daos, setDaos] = useState<DaoItem[]>([]);
   const [activeTab, setActiveTab] = useState<'onchain' | 'import'>('onchain');
+  const [isSetupOpen, setIsSetupOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isImporting, setIsImporting] = useState(false);
   const [isCreatingOnchain, setIsCreatingOnchain] = useState(false);
@@ -703,27 +704,52 @@ export const DashboardDaosPage = (): JSX.Element => {
       <article className="data-card">
         <div className="data-card-header">
           <h3>DAO Setup</h3>
-          <span className="status-chip">{activeTab === 'onchain' ? 'wallet-sign' : 'register'}</span>
+          {isSetupOpen ? <span className="status-chip">{activeTab === 'onchain' ? 'wallet-sign' : 'register'}</span> : null}
         </div>
-        <div className="auth-mode-switch" role="tablist" aria-label="DAO setup mode">
-          <button
-            type="button"
-            className={`tab-button${activeTab === 'onchain' ? ' tab-button-active' : ''}`}
-            onClick={() => setActiveTab('onchain')}
-          >
-            Create On-chain Realm
-          </button>
-          <button
-            type="button"
-            className={`tab-button${activeTab === 'import' ? ' tab-button-active' : ''}`}
-            onClick={() => setActiveTab('import')}
-          >
-            Import Existing Realm
-          </button>
-        </div>
+        {!isSetupOpen ? (
+          <div className="auth-form">
+            <p className="hint-text">Start by opening DAO setup, then choose on-chain creation or importing an existing realm.</p>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => {
+                setIsSetupOpen(true);
+                setActiveTab('onchain');
+              }}
+            >
+              Create DAO
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="auth-mode-switch" role="tablist" aria-label="DAO setup mode">
+              <button
+                type="button"
+                className={`tab-button${activeTab === 'onchain' ? ' tab-button-active' : ''}`}
+                onClick={() => setActiveTab('onchain')}
+              >
+                Create On-chain Realm
+              </button>
+              <button
+                type="button"
+                className={`tab-button${activeTab === 'import' ? ' tab-button-active' : ''}`}
+                onClick={() => setActiveTab('import')}
+              >
+                Import Existing Realm
+              </button>
+            </div>
 
-        {activeTab === 'onchain' ? (
-          <form className="auth-form" onSubmit={(event) => event.preventDefault()}>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => setIsSetupOpen(false)}
+              disabled={isImporting || isCreatingOnchain || isCreatingCommunityMint}
+            >
+              Close Setup
+            </button>
+
+            {activeTab === 'onchain' ? (
+              <form className="auth-form" onSubmit={(event) => event.preventDefault()}>
             <label className="input-label">
               Name
               <input
@@ -839,9 +865,9 @@ export const DashboardDaosPage = (): JSX.Element => {
             >
               {isCreatingOnchain ? 'Creating On-chain...' : 'Create On-chain Realm'}
             </button>
-          </form>
-        ) : (
-          <form className="auth-form" onSubmit={handleImportDao}>
+              </form>
+            ) : (
+              <form className="auth-form" onSubmit={handleImportDao}>
             <label className="input-label">
               Name
               <input
@@ -944,7 +970,9 @@ export const DashboardDaosPage = (): JSX.Element => {
             <button type="submit" className="primary-button" disabled={isImporting || isCreatingOnchain}>
               {isImporting ? 'Importing...' : 'Import Existing Realm'}
             </button>
-          </form>
+              </form>
+            )}
+          </>
         )}
       </article>
 
