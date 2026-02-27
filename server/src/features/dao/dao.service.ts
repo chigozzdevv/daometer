@@ -162,6 +162,7 @@ export const prepareDaoOnchainCreate = async (
   userId: Types.ObjectId,
 ): Promise<{
   transactionMessage: string;
+  transactionBase58: string;
   transactionBase64: string;
   realmAddress: string;
   authorityWallet: string;
@@ -214,16 +215,17 @@ export const prepareDaoOnchainCreate = async (
   transaction.feePayer = feePayer;
   const latestBlockhash = await connection.getLatestBlockhash(env.SOLANA_COMMITMENT as Commitment);
   transaction.recentBlockhash = latestBlockhash.blockhash;
+  const serializedTransaction = transaction.serialize({
+    requireAllSignatures: false,
+    verifySignatures: false,
+  });
   const transactionMessage = bs58.encode(transaction.serializeMessage());
-  const transactionBase64 = transaction
-    .serialize({
-      requireAllSignatures: false,
-      verifySignatures: false,
-    })
-    .toString('base64');
+  const transactionBase58 = bs58.encode(serializedTransaction);
+  const transactionBase64 = Buffer.from(serializedTransaction).toString('base64');
 
   return {
     transactionMessage,
+    transactionBase58,
     transactionBase64,
     realmAddress: realmAddress.toBase58(),
     authorityWallet: requestedAuthorityWallet,
@@ -240,6 +242,7 @@ export const prepareCommunityMintCreate = async (
   userId: Types.ObjectId,
 ): Promise<{
   transactionMessage: string;
+  transactionBase58: string;
   transactionBase64: string;
   mintAddress: string;
   symbol: string;
@@ -309,16 +312,17 @@ export const prepareCommunityMintCreate = async (
   transaction.feePayer = payerPubkey;
   const latestBlockhash = await connection.getLatestBlockhash(env.SOLANA_COMMITMENT as Commitment);
   transaction.recentBlockhash = latestBlockhash.blockhash;
+  const serializedTransaction = transaction.serialize({
+    requireAllSignatures: false,
+    verifySignatures: false,
+  });
   const transactionMessage = bs58.encode(transaction.serializeMessage());
-  const transactionBase64 = transaction
-    .serialize({
-      requireAllSignatures: false,
-      verifySignatures: false,
-    })
-    .toString('base64');
+  const transactionBase58 = bs58.encode(serializedTransaction);
+  const transactionBase64 = Buffer.from(serializedTransaction).toString('base64');
 
   return {
     transactionMessage,
+    transactionBase58,
     transactionBase64,
     mintAddress: mintPubkey.toBase58(),
     symbol,

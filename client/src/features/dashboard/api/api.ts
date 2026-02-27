@@ -46,6 +46,7 @@ export type PrepareDaoOnchainInput = {
 
 export type PrepareDaoOnchainResult = {
   transactionMessage: string;
+  transactionBase58: string;
   transactionBase64: string;
   realmAddress: string;
   authorityWallet: string;
@@ -66,6 +67,7 @@ export type PrepareCommunityMintInput = {
 
 export type PrepareCommunityMintResult = {
   transactionMessage: string;
+  transactionBase58: string;
   transactionBase64: string;
   mintAddress: string;
   symbol: string;

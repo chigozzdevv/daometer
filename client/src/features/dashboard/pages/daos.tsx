@@ -37,7 +37,13 @@ const getSolanaProvider = (): SolanaProvider | null => {
     return null;
   }
 
-  const candidate = (window as unknown as { solana?: SolanaProvider }).solana;
+  const walletWindow = window as unknown as {
+    solana?: SolanaProvider;
+    phantom?: {
+      solana?: SolanaProvider;
+    };
+  };
+  const candidate = walletWindow.phantom?.solana ?? walletWindow.solana;
 
   if (!candidate || typeof candidate.connect !== 'function') {
     return null;
@@ -90,12 +96,35 @@ const extractSignature = (result: unknown): string | null => {
 const sendPreparedTransaction = async (
   provider: SolanaProvider,
   transactionMessage: string,
+  transactionBase58: string,
   transactionBase64: string,
 ): Promise<string> => {
   const errors: string[] = [];
 
   if (typeof provider.request === 'function') {
     const requestVariants: Array<{ label: string; params: unknown }> = [
+      {
+        label: 'request(transaction-base58)',
+        params: {
+          transaction: transactionBase58,
+          options: {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed',
+          },
+        },
+      },
+      {
+        label: 'request([transaction-base58])',
+        params: [
+          {
+            transaction: transactionBase58,
+            options: {
+              skipPreflight: false,
+              preflightCommitment: 'confirmed',
+            },
+          },
+        ],
+      },
       {
         label: 'request(message-object)',
         params: {
@@ -372,6 +401,7 @@ export const DashboardDaosPage = (): JSX.Element => {
       const signature = await sendPreparedTransaction(
         provider,
         prepared.transactionMessage,
+        prepared.transactionBase58,
         prepared.transactionBase64,
       );
 
@@ -447,6 +477,7 @@ export const DashboardDaosPage = (): JSX.Element => {
       const signature = await sendPreparedTransaction(
         provider,
         prepared.transactionMessage,
+        prepared.transactionBase58,
         prepared.transactionBase64,
       );
 
