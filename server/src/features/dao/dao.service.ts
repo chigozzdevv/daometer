@@ -11,7 +11,20 @@ import {
   TransactionInstruction,
   type Commitment,
 } from '@solana/web3.js';
-import { getAllGovernances, getNativeTreasuryAddress, MintMaxVoteWeightSource, withCreateRealm } from '@realms-today/spl-governance';
+import {
+  getAllGovernances,
+  getNativeTreasuryAddress,
+  getTokenOwnerRecordAddress,
+  GovernanceConfig,
+  MintMaxVoteWeightSource,
+  VoteThreshold,
+  VoteThresholdType,
+  VoteTipping,
+  withCreateGovernance,
+  withCreateNativeTreasury,
+  withCreateRealm,
+  withCreateTokenOwnerRecord,
+} from '@realms-today/spl-governance';
 import { env } from '@/config/env.config';
 import { UserModel } from '@/features/auth/auth.model';
 import { DaoModel, type DaoDocument } from '@/features/dao/dao.model';
@@ -66,6 +79,14 @@ type PrepareCommunityMintInput = {
   authorityWallet?: string;
   decimals: number;
   rpcUrl?: string;
+};
+
+type PrepareGovernanceCreateInput = {
+  createAuthorityWallet?: string;
+  voteScope: 'community' | 'council';
+  governingTokenMint?: string;
+  rpcUrl?: string;
+  programVersion: number;
 };
 
 type DaoGovernanceSummary = {
@@ -351,6 +372,182 @@ export const prepareCommunityMintCreate = async (
     recentBlockhash: latestBlockhash.blockhash,
     lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
     network: input.network,
+  };
+};
+
+const buildDefaultGovernanceConfig = (hasCouncil: boolean): GovernanceConfig => {
+  const yes60 = new VoteThreshold({
+    type: VoteThresholdType.YesVotePercentage,
+    value: 60,
+  });
+  const yes50 = new VoteThreshold({
+    type: VoteThresholdType.YesVotePercentage,
+    value: 50,
+  });
+  const disabled = new VoteThreshold({
+    type: VoteThresholdType.Disabled,
+  });
+
+  return new GovernanceConfig({
+    communityVoteThreshold: yes60,
+    minCommunityTokensToCreateProposal: new BN(1),
+    minInstructionHoldUpTime: 0,
+    baseVotingTime: 3 * 24 * 60 * 60,
+    communityVoteTipping: VoteTipping.Strict,
+    councilVoteThreshold: hasCouncil ? yes60 : disabled,
+    councilVetoVoteThreshold: hasCouncil ? yes50 : disabled,
+    minCouncilTokensToCreateProposal: new BN(hasCouncil ? 1 : 0),
+    councilVoteTipping: VoteTipping.Strict,
+    communityVetoVoteThreshold: disabled,
+    votingCoolOffTime: 0,
+    depositExemptProposalCount: 10,
+  });
+};
+
+export const prepareGovernanceCreate = async (
+  daoId: string,
+  input: PrepareGovernanceCreateInput,
+  userId: Types.ObjectId,
+): Promise<{
+  transactionMessage: string;
+  transactionBase58: string;
+  transactionBase64: string;
+  governanceAddress: string;
+  nativeTreasuryAddress: string;
+  authorityWallet: string;
+  governanceProgramId: string;
+  realmAddress: string;
+  governingTokenMint: string;
+  rpcUrl: string;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
+  network: 'mainnet-beta' | 'devnet';
+}> => {
+  const dao = await assertCanManageDao(daoId, userId);
+  const creator = await UserModel.findById(userId).select('walletAddress roles');
+
+  if (!creator?.walletAddress) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const creatorWalletAddress = normalizeAddress(creator.walletAddress, 'creator wallet');
+  const requestedAuthorityWallet = input.createAuthorityWallet
+    ? normalizeAddress(input.createAuthorityWallet, 'create authority wallet')
+    : dao.authorityWallet;
+  const isAdmin = creator.roles.includes('admin');
+
+  if (!isAdmin && requestedAuthorityWallet !== creatorWalletAddress) {
+    throw new AppError('Create authority wallet must match your connected wallet', 403, 'DAO_AUTHORITY_WALLET_MISMATCH');
+  }
+
+  if (requestedAuthorityWallet !== dao.authorityWallet) {
+    throw new AppError(
+      'Create authority must be the DAO authority wallet. Update DAO authority first if needed.',
+      400,
+      'DAO_GOVERNANCE_CREATE_AUTHORITY_INVALID',
+    );
+  }
+
+  const governanceProgramId = normalizeAddress(dao.governanceProgramId, 'governance program id');
+  const realmAddress = normalizeAddress(dao.realmAddress, 'realm address');
+  const hasCouncil = Boolean(dao.councilMint);
+  const voteScope = input.voteScope ?? 'community';
+  const fallbackMint =
+    voteScope === 'council'
+      ? dao.councilMint
+      : dao.communityMint;
+  const governingTokenMint = input.governingTokenMint
+    ? normalizeAddress(input.governingTokenMint, 'governing token mint')
+    : fallbackMint;
+
+  if (!governingTokenMint) {
+    throw new AppError(
+      voteScope === 'council'
+        ? 'Council mint is missing for this DAO. Set council mint or use community scope.'
+        : 'Community mint is missing for this DAO.',
+      400,
+      'DAO_GOVERNING_TOKEN_MINT_MISSING',
+    );
+  }
+
+  const rpcUrl = input.rpcUrl ?? defaultRpcByNetwork[dao.network];
+  const connection = new Connection(rpcUrl, { commitment: env.SOLANA_COMMITMENT as Commitment });
+  const programIdPk = new PublicKey(governanceProgramId);
+  const realmPk = new PublicKey(realmAddress);
+  const payerPk = new PublicKey(creatorWalletAddress);
+  const authorityPk = new PublicKey(requestedAuthorityWallet);
+  const governingTokenMintPk = new PublicKey(governingTokenMint);
+  const instructions: TransactionInstruction[] = [];
+
+  const tokenOwnerRecordAddress = await getTokenOwnerRecordAddress(
+    programIdPk,
+    realmPk,
+    governingTokenMintPk,
+    authorityPk,
+  );
+  const tokenOwnerRecordAccount = await connection.getAccountInfo(
+    tokenOwnerRecordAddress,
+    env.SOLANA_COMMITMENT as Commitment,
+  );
+
+  if (!tokenOwnerRecordAccount) {
+    await withCreateTokenOwnerRecord(
+      instructions,
+      programIdPk,
+      input.programVersion,
+      realmPk,
+      authorityPk,
+      governingTokenMintPk,
+      payerPk,
+    );
+  }
+
+  const governanceConfig = buildDefaultGovernanceConfig(hasCouncil);
+  const governanceAddress = await withCreateGovernance(
+    instructions,
+    programIdPk,
+    input.programVersion,
+    realmPk,
+    undefined,
+    governanceConfig,
+    tokenOwnerRecordAddress,
+    payerPk,
+    authorityPk,
+  );
+  const nativeTreasuryAddress = await withCreateNativeTreasury(
+    instructions,
+    programIdPk,
+    input.programVersion,
+    governanceAddress,
+    payerPk,
+  );
+
+  const transaction = new Transaction().add(...instructions);
+  transaction.feePayer = payerPk;
+  const latestBlockhash = await connection.getLatestBlockhash(env.SOLANA_COMMITMENT as Commitment);
+  transaction.recentBlockhash = latestBlockhash.blockhash;
+  const serializedTransaction = transaction.serialize({
+    requireAllSignatures: false,
+    verifySignatures: false,
+  });
+  const transactionMessage = bs58.encode(transaction.serializeMessage());
+  const transactionBase58 = bs58.encode(serializedTransaction);
+  const transactionBase64 = Buffer.from(serializedTransaction).toString('base64');
+
+  return {
+    transactionMessage,
+    transactionBase58,
+    transactionBase64,
+    governanceAddress: governanceAddress.toBase58(),
+    nativeTreasuryAddress: nativeTreasuryAddress.toBase58(),
+    authorityWallet: requestedAuthorityWallet,
+    governanceProgramId,
+    realmAddress,
+    governingTokenMint,
+    rpcUrl,
+    recentBlockhash: latestBlockhash.blockhash,
+    lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+    network: dao.network,
   };
 };
 

@@ -1207,6 +1207,11 @@ p {
   color: var(--black);
 }
 
+.dao-governance-quick-actions {
+  display: grid;
+  gap: 0.35rem;
+}
+
 .dao-governance-config-controls {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;

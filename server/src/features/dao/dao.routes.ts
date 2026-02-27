@@ -6,6 +6,7 @@ import {
   getDaoSchema,
   listDaoGovernancesSchema,
   listDaoSchema,
+  prepareGovernanceCreateSchema,
   prepareCommunityMintSchema,
   updateDaoSchema,
 } from '@/features/dao/dao.schema';
@@ -22,6 +23,12 @@ daoRouter.post(
   requireAuth,
   validateRequest(prepareCommunityMintSchema),
   daoController.prepareCommunityMint,
+);
+daoRouter.post(
+  '/:daoId/prepare-governance',
+  requireAuth,
+  validateRequest(prepareGovernanceCreateSchema),
+  daoController.prepareGovernance,
 );
 daoRouter.get('/:daoId/governances', validateRequest(listDaoGovernancesSchema), daoController.listGovernances);
 daoRouter.get('/:daoId', validateRequest(getDaoSchema), daoController.getById);

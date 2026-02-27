@@ -7,6 +7,7 @@ import {
   getAuthProfile,
   getDaos,
   prepareCommunityMint,
+  prepareDaoGovernanceCreate,
   prepareDaoOnchainCreate,
   updateDao,
   type DaoGovernanceItem,
@@ -339,6 +340,9 @@ export const DashboardDaosPage = (): JSX.Element => {
   const [governanceErrorByDao, setGovernanceErrorByDao] = useState<Record<string, string | null>>({});
   const [selectedDefaultGovernanceByDao, setSelectedDefaultGovernanceByDao] = useState<Record<string, string>>({});
   const [savingDefaultGovernanceByDao, setSavingDefaultGovernanceByDao] = useState<Record<string, boolean>>({});
+  const [creatingGovernanceByDao, setCreatingGovernanceByDao] = useState<Record<string, boolean>>({});
+  const [governanceCreateSuccessByDao, setGovernanceCreateSuccessByDao] = useState<Record<string, string | null>>({});
+  const [governanceCreateErrorByDao, setGovernanceCreateErrorByDao] = useState<Record<string, string | null>>({});
 
   const loadDaos = async (): Promise<void> => {
     setIsLoading(true);
@@ -407,6 +411,87 @@ export const DashboardDaosPage = (): JSX.Element => {
       setError(updateError instanceof Error ? updateError.message : 'Unable to update default governance');
     } finally {
       setSavingDefaultGovernanceByDao((current) => ({ ...current, [dao.id]: false }));
+    }
+  };
+
+  const handleCreateGovernanceForDao = async (dao: DaoItem): Promise<void> => {
+    setGovernanceCreateErrorByDao((current) => ({ ...current, [dao.id]: null }));
+    setGovernanceCreateSuccessByDao((current) => ({ ...current, [dao.id]: null }));
+
+    if (!session?.accessToken) {
+      setGovernanceCreateErrorByDao((current) => ({
+        ...current,
+        [dao.id]: 'You must be authenticated to create governance.',
+      }));
+      return;
+    }
+
+    setCreatingGovernanceByDao((current) => ({ ...current, [dao.id]: true }));
+
+    try {
+      const provider = getSolanaProvider();
+
+      if (!provider) {
+        throw new Error('No Solana wallet detected. Install Phantom or another wallet extension.');
+      }
+
+      const connectResult = await provider.connect();
+      const connectedWallet = connectResult.publicKey?.toBase58() ?? provider.publicKey?.toBase58();
+
+      if (!connectedWallet) {
+        throw new Error('Wallet connection failed. Try reconnecting your wallet.');
+      }
+
+      const prepared = await prepareDaoGovernanceCreate(
+        dao.id,
+        {
+          voteScope: 'community',
+          createAuthorityWallet: connectedWallet,
+          programVersion: 3,
+        },
+        session.accessToken,
+      );
+
+      if (connectedWallet !== prepared.authorityWallet) {
+        throw new Error('Connected wallet must match DAO authority wallet for governance creation.');
+      }
+
+      const signature = await sendPreparedTransaction(
+        provider,
+        prepared.transactionMessage,
+        prepared.transactionBase58,
+        prepared.transactionBase64,
+      );
+
+      setGovernanceCreateSuccessByDao((current) => ({
+        ...current,
+        [dao.id]: `Governance created ${prepared.governanceAddress.slice(0, 8)}... Tx: ${signature.slice(0, 12)}...`,
+      }));
+
+      if (!dao.defaultGovernanceAddress) {
+        const updatedDao = await updateDao(
+          dao.id,
+          {
+            defaultGovernanceAddress: prepared.governanceAddress,
+          },
+          session.accessToken,
+        );
+
+        setDaos((current) => current.map((item) => (item.id === updatedDao.id ? updatedDao : item)));
+        setSelectedDefaultGovernanceByDao((current) => ({
+          ...current,
+          [dao.id]: prepared.governanceAddress,
+        }));
+      }
+
+      await loadGovernancesForDao(dao.id);
+    } catch (createError) {
+      setGovernanceCreateErrorByDao((current) => ({
+        ...current,
+        [dao.id]: createError instanceof Error ? createError.message : 'Unable to create governance account',
+      }));
+    } finally {
+      setCreatingGovernanceByDao((current) => ({ ...current, [dao.id]: false }));
     }
   };
 
@@ -1224,6 +1309,26 @@ export const DashboardDaosPage = (): JSX.Element => {
                 </div>
 
                 {governanceErrorByDao[dao.id] ? <p className="error-text">{governanceErrorByDao[dao.id]}</p> : null}
+                {governanceCreateErrorByDao[dao.id] ? (
+                  <p className="error-text">{governanceCreateErrorByDao[dao.id]}</p>
+                ) : null}
+                {governanceCreateSuccessByDao[dao.id] ? (
+                  <p className="success-text">{governanceCreateSuccessByDao[dao.id]}</p>
+                ) : null}
+
+                <div className="dao-governance-quick-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={Boolean(creatingGovernanceByDao[dao.id])}
+                    onClick={() => {
+                      void handleCreateGovernanceForDao(dao);
+                    }}
+                  >
+                    {creatingGovernanceByDao[dao.id] ? 'Creating governance...' : 'Create governance + treasury'}
+                  </button>
+                  <span className="hint-text">Wallet-sign. Uses DAO authority wallet and default voting config.</span>
+                </div>
 
                 {governancesByDao[dao.id] ? (
                   <div className="dao-governance-config-controls">

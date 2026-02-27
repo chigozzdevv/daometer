@@ -55,6 +55,20 @@ export const prepareCommunityMintSchema = z.object({
   query: emptyObject,
 });
 
+export const prepareGovernanceCreateSchema = z.object({
+  body: z.object({
+    createAuthorityWallet: z.string().trim().regex(base58Regex, 'Invalid create authority wallet').optional(),
+    voteScope: z.enum(['community', 'council']).default('community'),
+    governingTokenMint: z.string().trim().regex(base58Regex, 'Invalid governing token mint').optional(),
+    rpcUrl: z.string().trim().url().optional(),
+    programVersion: z.number().int().min(1).max(10).default(3),
+  }),
+  params: z.object({
+    daoId: z.string().trim().length(24),
+  }),
+  query: emptyObject,
+});
+
 export const updateDaoSchema = z.object({
   body: z
     .object({

@@ -109,6 +109,30 @@ export type PrepareCommunityMintResult = {
   network: 'mainnet-beta' | 'devnet';
 };
 
+export type PrepareDaoGovernanceInput = {
+  createAuthorityWallet?: string;
+  voteScope?: 'community' | 'council';
+  governingTokenMint?: string;
+  rpcUrl?: string;
+  programVersion?: number;
+};
+
+export type PrepareDaoGovernanceResult = {
+  transactionMessage: string;
+  transactionBase58: string;
+  transactionBase64: string;
+  governanceAddress: string;
+  nativeTreasuryAddress: string;
+  authorityWallet: string;
+  governanceProgramId: string;
+  realmAddress: string;
+  governingTokenMint: string;
+  rpcUrl: string;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
+  network: 'mainnet-beta' | 'devnet';
+};
+
 export type FlowItem = {
   id: string;
   daoId: string;
@@ -488,6 +512,17 @@ export const prepareCommunityMint = async (
   accessToken: string,
 ): Promise<PrepareCommunityMintResult> =>
   apiRequest<PrepareCommunityMintResult>('/daos/prepare-community-mint', {
+    method: 'POST',
+    body: input,
+    accessToken,
+  });
+
+export const prepareDaoGovernanceCreate = async (
+  daoId: string,
+  input: PrepareDaoGovernanceInput,
+  accessToken: string,
+): Promise<PrepareDaoGovernanceResult> =>
+  apiRequest<PrepareDaoGovernanceResult>(`/daos/${daoId}/prepare-governance`, {
     method: 'POST',
     body: input,
     accessToken,
