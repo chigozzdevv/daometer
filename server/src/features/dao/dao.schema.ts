@@ -82,6 +82,16 @@ export const getDaoSchema = z.object({
   query: emptyObject,
 });
 
+export const listDaoGovernancesSchema = z.object({
+  body: emptyObject,
+  params: z.object({
+    daoId: z.string().trim().length(24),
+  }),
+  query: z.object({
+    rpcUrl: z.string().trim().url().optional(),
+  }),
+});
+
 export const listDaoSchema = z.object({
   body: emptyObject,
   params: emptyObject,

@@ -11,7 +11,7 @@ import {
   TransactionInstruction,
   type Commitment,
 } from '@solana/web3.js';
-import { MintMaxVoteWeightSource, withCreateRealm } from '@realms-today/spl-governance';
+import { getAllGovernances, MintMaxVoteWeightSource, withCreateRealm } from '@realms-today/spl-governance';
 import { env } from '@/config/env.config';
 import { UserModel } from '@/features/auth/auth.model';
 import { DaoModel, type DaoDocument } from '@/features/dao/dao.model';
@@ -64,6 +64,11 @@ type PrepareCommunityMintInput = {
   authorityWallet?: string;
   decimals: number;
   rpcUrl?: string;
+};
+
+type DaoGovernanceSummary = {
+  address: string;
+  governedAccount: string | null;
 };
 
 const normalizeAddress = (address: string, fieldName: string): string => {
@@ -368,6 +373,61 @@ export const listDaos = async ({ page, limit, search }: { page: number; limit: n
       total,
       totalPages: Math.ceil(total / limit),
     },
+  };
+};
+
+export const listDaoGovernances = async (
+  daoId: string,
+  options: { rpcUrl?: string } = {},
+): Promise<{
+  daoId: string;
+  realmAddress: string;
+  governanceProgramId: string;
+  network: 'mainnet-beta' | 'devnet';
+  rpcUrl: string;
+  items: DaoGovernanceSummary[];
+}> => {
+  const dao = await DaoModel.findById(daoId).select('network realmAddress governanceProgramId');
+
+  if (!dao) {
+    throw new AppError('DAO not found', 404, 'DAO_NOT_FOUND');
+  }
+
+  const rpcUrl = options.rpcUrl ?? defaultRpcByNetwork[dao.network];
+  const connection = new Connection(rpcUrl, { commitment: env.SOLANA_COMMITMENT as Commitment });
+  const programId = new PublicKey(dao.governanceProgramId);
+  const realmAddress = new PublicKey(dao.realmAddress);
+
+  const allGovernancesRaw = await getAllGovernances(connection, programId, realmAddress);
+  const flattenedGovernances = Array.isArray(allGovernancesRaw)
+    ? (allGovernancesRaw as Array<unknown>).flat()
+    : [];
+
+  const items = flattenedGovernances
+    .map((governanceAccount) => {
+      const pubkey = (governanceAccount as { pubkey?: PublicKey }).pubkey;
+      const governedAccount = (governanceAccount as { account?: { governedAccount?: PublicKey | null } }).account
+        ?.governedAccount;
+
+      if (!(pubkey instanceof PublicKey)) {
+        return null;
+      }
+
+      return {
+        address: pubkey.toBase58(),
+        governedAccount: governedAccount instanceof PublicKey ? governedAccount.toBase58() : null,
+      } satisfies DaoGovernanceSummary;
+    })
+    .filter((value): value is DaoGovernanceSummary => Boolean(value))
+    .sort((left, right) => left.address.localeCompare(right.address));
+
+  return {
+    daoId,
+    realmAddress: dao.realmAddress,
+    governanceProgramId: dao.governanceProgramId,
+    network: dao.network,
+    rpcUrl,
+    items,
   };
 };
 

@@ -4,6 +4,7 @@ import { asyncHandler } from '@/shared/utils/async-handler.util';
 import {
   createDao,
   getDaoById,
+  listDaoGovernances,
   listDaos,
   prepareCommunityMintCreate,
   prepareDaoOnchainCreate,
@@ -67,6 +68,17 @@ export const getById = asyncHandler(async (req: Request, res: Response) => {
   res.status(200).json({
     success: true,
     data: dao,
+  });
+});
+
+export const listGovernances = asyncHandler(async (req: Request, res: Response) => {
+  const { daoId } = req.params as { daoId: string };
+  const { rpcUrl } = req.query as { rpcUrl?: string };
+  const result = await listDaoGovernances(daoId, { rpcUrl });
+
+  res.status(200).json({
+    success: true,
+    data: result,
   });
 });
 

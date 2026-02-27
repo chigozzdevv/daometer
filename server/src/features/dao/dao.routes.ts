@@ -4,6 +4,7 @@ import {
   createDaoOnchainSchema,
   createDaoSchema,
   getDaoSchema,
+  listDaoGovernancesSchema,
   listDaoSchema,
   prepareCommunityMintSchema,
   updateDaoSchema,
@@ -22,5 +23,6 @@ daoRouter.post(
   validateRequest(prepareCommunityMintSchema),
   daoController.prepareCommunityMint,
 );
+daoRouter.get('/:daoId/governances', validateRequest(listDaoGovernancesSchema), daoController.listGovernances);
 daoRouter.get('/:daoId', validateRequest(getDaoSchema), daoController.getById);
 daoRouter.patch('/:daoId', requireAuth, validateRequest(updateDaoSchema), daoController.update);

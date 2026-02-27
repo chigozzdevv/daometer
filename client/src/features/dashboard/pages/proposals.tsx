@@ -3,8 +3,10 @@ import { useAuth } from '@/app/providers/auth-provider';
 import {
   createProposal,
   createProposalOnchain,
+  getDaoGovernances,
   getDaoProposals,
   getDaos,
+  type DaoGovernanceItem,
   type DaoItem,
   type ProposalItem,
 } from '@/features/dashboard/api/api';
@@ -64,6 +66,9 @@ export const DashboardProposalsPage = (): JSX.Element => {
   const [createOnchainNow, setCreateOnchainNow] = useState(true);
   const [createGovernanceAddress, setCreateGovernanceAddress] = useState('');
   const [createGoverningTokenMint, setCreateGoverningTokenMint] = useState('');
+  const [governanceOptions, setGovernanceOptions] = useState<DaoGovernanceItem[]>([]);
+  const [isLoadingGovernances, setIsLoadingGovernances] = useState(false);
+  const [governanceError, setGovernanceError] = useState<string | null>(null);
 
   const selectedDao = useMemo(
     () => daos.find((dao) => dao.id === selectedDaoId) ?? null,
@@ -77,6 +82,52 @@ export const DashboardProposalsPage = (): JSX.Element => {
 
     setCreateGoverningTokenMint((current) => current || selectedDao.communityMint || '');
   }, [selectedDao]);
+
+  useEffect(() => {
+    if (!selectedDaoId) {
+      setGovernanceOptions([]);
+      setCreateGovernanceAddress('');
+      setGovernanceError(null);
+      setIsLoadingGovernances(false);
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadGovernances = async (): Promise<void> => {
+      setIsLoadingGovernances(true);
+      setGovernanceError(null);
+
+      try {
+        const response = await getDaoGovernances(selectedDaoId);
+        if (!isMounted) return;
+        setGovernanceOptions(response.items);
+        setCreateGovernanceAddress((current) => {
+          if (!response.items.length) {
+            return '';
+          }
+
+          if (current && response.items.some((item) => item.address === current)) {
+            return current;
+          }
+
+          return response.items[0]?.address ?? '';
+        });
+      } catch (loadError) {
+        if (!isMounted) return;
+        setGovernanceOptions([]);
+        setCreateGovernanceAddress('');
+        setGovernanceError(loadError instanceof Error ? loadError.message : 'Unable to load governance accounts');
+      } finally {
+        if (isMounted) setIsLoadingGovernances(false);
+      }
+    };
+
+    void loadGovernances();
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedDaoId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -196,7 +247,7 @@ export const DashboardProposalsPage = (): JSX.Element => {
         }
 
         if (!createGovernanceAddress.trim()) {
-          throw new Error('Governance address is required for on-chain creation.');
+          throw new Error('Select a governance account for on-chain creation.');
         }
 
         if (!createGoverningTokenMint.trim()) {
@@ -245,6 +296,7 @@ export const DashboardProposalsPage = (): JSX.Element => {
   };
 
   const isLoading = isLoadingDaos || isLoadingProposals;
+  const selectedGovernance = governanceOptions.find((item) => item.address === createGovernanceAddress) ?? null;
 
   return (
     <DashboardShell title="Proposals" description="Real proposal states, risk, and execution metadata by DAO.">
@@ -405,14 +457,72 @@ export const DashboardProposalsPage = (): JSX.Element => {
             {createOnchainNow ? (
               <>
                 <label className="input-label">
-                  Governance address
-                  <input
-                    className="text-input"
+                  Governance account
+                  <select
+                    className="select-input"
                     value={createGovernanceAddress}
                     onChange={(event) => setCreateGovernanceAddress(event.target.value)}
                     required
-                  />
+                    disabled={isLoadingGovernances || governanceOptions.length === 0}
+                  >
+                    {governanceOptions.length === 0 ? (
+                      <option value="">
+                        {isLoadingGovernances ? 'Loading governance accounts...' : 'No governance accounts found'}
+                      </option>
+                    ) : null}
+                    {governanceOptions.map((item) => (
+                      <option key={item.address} value={item.address}>
+                        {item.address}
+                      </option>
+                    ))}
+                  </select>
                 </label>
+
+                <div className="dao-card-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={async () => {
+                      if (!selectedDaoId) return;
+                      setGovernanceError(null);
+                      setIsLoadingGovernances(true);
+                      try {
+                        const response = await getDaoGovernances(selectedDaoId);
+                        setGovernanceOptions(response.items);
+                        setCreateGovernanceAddress((current) => {
+                          if (!response.items.length) return '';
+                          if (current && response.items.some((item) => item.address === current)) return current;
+                          return response.items[0]?.address ?? '';
+                        });
+                      } catch (refreshError) {
+                        setGovernanceOptions([]);
+                        setCreateGovernanceAddress('');
+                        setGovernanceError(
+                          refreshError instanceof Error ? refreshError.message : 'Unable to refresh governance accounts',
+                        );
+                      } finally {
+                        setIsLoadingGovernances(false);
+                      }
+                    }}
+                  >
+                    {isLoadingGovernances ? 'Refreshing...' : 'Refresh governance list'}
+                  </button>
+                </div>
+
+                {selectedGovernance?.governedAccount ? (
+                  <p className="hint-text">
+                    Governed account: <code>{selectedGovernance.governedAccount}</code>
+                  </p>
+                ) : null}
+                {governanceError ? <p className="error-text">{governanceError}</p> : null}
+                {!isLoadingGovernances && governanceOptions.length === 0 && selectedDao ? (
+                  <p className="hint-text">
+                    Create a governance in Realms first, then return and refresh.{' '}
+                    <a href={getRealmDetailUrl(selectedDao.realmAddress, selectedDao.network)} target="_blank" rel="noreferrer">
+                      Open in Realms
+                    </a>
+                  </p>
+                ) : null}
 
                 <label className="input-label">
                   Governing token mint

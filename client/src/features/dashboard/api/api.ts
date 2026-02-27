@@ -33,6 +33,20 @@ export type CreateDaoInput = {
   slug?: string;
 };
 
+export type DaoGovernanceItem = {
+  address: string;
+  governedAccount: string | null;
+};
+
+export type DaoGovernancesResponse = {
+  daoId: string;
+  realmAddress: string;
+  governanceProgramId: string;
+  network: 'mainnet-beta' | 'devnet';
+  rpcUrl: string;
+  items: DaoGovernanceItem[];
+};
+
 export type PrepareDaoOnchainInput = {
   name: string;
   network: 'mainnet-beta' | 'devnet';
@@ -403,6 +417,9 @@ export const createDao = async (input: CreateDaoInput, accessToken: string): Pro
     body: input,
     accessToken,
   });
+
+export const getDaoGovernances = async (daoId: string): Promise<DaoGovernancesResponse> =>
+  apiRequest<DaoGovernancesResponse>(`/daos/${daoId}/governances`);
 
 export const prepareDaoOnchainCreate = async (
   input: PrepareDaoOnchainInput,
