@@ -33,6 +33,8 @@ import ReactFlow, {
   type NodeChange,
   type NodeProps,
   type NodeTypes,
+  useNodesState,
+  useEdgesState,
 } from 'reactflow';
 import { NodeResizer } from '@reactflow/node-resizer';
 import 'reactflow/dist/style.css';
@@ -90,8 +92,7 @@ const FlowBlockNode = memo(({ id, data, selected }: NodeProps<FlowBlockNodeData>
       />
       <Handle type="target" position={Position.Left} />
       <div
-        className="flow-block-node"
-        onClick={() => data.onSelect(blockId)}
+        className={`flow-block-node ${selected ? 'selected' : ''}`}
       >
         <div className="flow-node-header">
           <div className="flow-node-title">
@@ -231,14 +232,14 @@ const inflateBlockForEditor = (block: FlowBlockInput): FlowBlockInput => {
 
   const accounts = Array.isArray(block.accounts)
     ? block.accounts
-        .map((entry) => {
-          if (!entry || typeof entry !== 'object') {
-            return '';
-          }
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') {
+          return '';
+        }
 
-          return getString((entry as { pubkey?: string }).pubkey);
-        })
-        .filter(Boolean)
+        return getString((entry as { pubkey?: string }).pubkey);
+      })
+      .filter(Boolean)
     : [];
 
   return {
@@ -436,10 +437,8 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
   const [success, setSuccess] = useState<string | null>(null);
 
   const [blocks, setBlocks] = useState<FlowBlockInput[]>([]);
-  const [graphNodes, setGraphNodes] = useState<FlowGraphNode[]>([]);
-  const [graphEdges, setGraphEdges] = useState<FlowGraphEdge[]>([]);
-  const [nodeWidths, setNodeWidths] = useState<Record<string, number>>({});
-  const [nodeMeta, setNodeMeta] = useState<Record<string, { dragging?: boolean; resizing?: boolean }>>({});
+  const [nodes, setNodes, onNodesChangeReactFlow] = useNodesState<FlowBlockNodeData>([]);
+  const [edges, setEdges, onEdgesChangeReactFlow] = useEdgesState<Edge>([]);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
 
   const [configForm, setConfigForm] = useState<Record<string, unknown>>({});
@@ -454,18 +453,16 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
   const [publishGoverningTokenMint, setPublishGoverningTokenMint] = useState('');
   const [publishUseGovernanceOverride, setPublishUseGovernanceOverride] = useState(false);
 
-  const graphNodeMap = useMemo(() => new Map(graphNodes.map((node) => [node.id, node])), [graphNodes]);
   const selectedGovernance = useMemo(
     () => governanceOptions.find((item) => item.address === publishGovernanceAddress) ?? null,
     [governanceOptions, publishGovernanceAddress],
   );
-  const getNodeWidth = (nodeId: string): number => nodeWidths[nodeId] ?? defaultNodeWidth;
   const saveStateLabel = isAutoSaving ? 'Saving...' : 'Saved';
 
   const orderingPreview = useMemo(() => {
     try {
       return {
-        ids: topologicalSortBlocks(blocks, graphEdges).map((block) => getBlockId(block)),
+        ids: topologicalSortBlocks(blocks, edges as FlowGraphEdge[]).map((block) => getBlockId(block)),
         error: null,
       };
     } catch (orderingError) {
@@ -474,7 +471,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
         error: orderingError instanceof Error ? orderingError.message : 'Invalid links',
       };
     }
-  }, [blocks, graphEdges]);
+  }, [blocks, edges]);
 
   const selectedBlock = useMemo(
     () => blocks.find((block) => getBlockId(block) === selectedBlockId) ?? null,
@@ -498,11 +495,33 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
     const draft = deriveDraftFromPersistedBlocks(persistedBlocks);
 
     setBlocks(draft.blocks);
-    setGraphNodes(draft.graphNodes);
-    setGraphEdges(draft.graphEdges);
-    setNodeWidths(draft.nodeWidths);
-    setNodeMeta({});
-  }, [accessToken, flowId]);
+
+    // Convert to robust ReactFlow node state immediately
+    const initialNodes: Node<FlowBlockNodeData>[] = draft.blocks.map((block, index) => {
+      const blockId = getBlockId(block) || `legacy-block-${index}`;
+      const graphNode = draft.graphNodes.find(n => n.id === blockId) ?? getDefaultNodePosition(index);
+      return {
+        id: blockId,
+        type: 'flowBlock',
+        position: { x: graphNode.x, y: graphNode.y },
+        style: { width: draft.nodeWidths[blockId] ?? defaultNodeWidth },
+        data: {
+          block,
+          blockType: getString(block.type, 'transfer-sol') as SupportedBlockType,
+          onSelect: handleSelectBlock,
+          onRemove: removeBlock,
+          onResizeWidth: handleNodeResize,
+        }
+      };
+    });
+    setNodes(initialNodes);
+    setEdges(draft.graphEdges.map((e: FlowGraphEdge) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      type: 'smoothstep'
+    })));
+  }, [accessToken, flowId]); // We omit onRemove / handleNodeResize from deps to avoid looping, they use refs natively or are stable.
 
   const runPersistedMutation = useCallback(
     async (
@@ -553,10 +572,31 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
       setFlowDescription(flow.description ?? '');
       setFlowDaoId(flow.daoId);
       setBlocks(draft.blocks);
-      setGraphNodes(draft.graphNodes);
-      setGraphEdges(draft.graphEdges);
-      setNodeWidths(draft.nodeWidths);
-      setNodeMeta({});
+
+      const initialNodes: Node<FlowBlockNodeData>[] = draft.blocks.map((block, index) => {
+        const blockId = getBlockId(block) || `legacy-block-${index}`;
+        const graphNode = draft.graphNodes.find(n => n.id === blockId) ?? getDefaultNodePosition(index);
+        return {
+          id: blockId,
+          type: 'flowBlock',
+          position: { x: graphNode.x, y: graphNode.y },
+          style: { width: draft.nodeWidths[blockId] ?? defaultNodeWidth },
+          data: {
+            block,
+            blockType: getString(block.type, 'transfer-sol') as SupportedBlockType,
+            onSelect: handleSelectBlock,
+            onRemove: removeBlock,
+            onResizeWidth: handleNodeResize,
+          }
+        };
+      });
+      setNodes(initialNodes);
+      setEdges(draft.graphEdges.map((e: FlowGraphEdge) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        type: 'smoothstep'
+      })));
       setSelectedBlockId(null);
       setActiveStep('builder');
       setCompileResult(null);
@@ -914,10 +954,13 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
   const addBlock = (type: SupportedBlockType): void => {
     const nextBlock = normalizeBlocksForApi([applyDaoDefaultsToBlock(defaultBlockForType(type))])[0];
     const nextBlockId = getBlockId(nextBlock);
-    const position = getDefaultNodePosition(graphNodes.length);
+    const position = getDefaultNodePosition(nodes.length);
 
     setSelectedBlockId(nextBlockId);
     setConfigForm({ ...nextBlock });
+
+    setBlocks((current) => [...current, nextBlock]);
+    setNodes((current) => [...current, { id: nextBlockId, type: 'flowBlock', position, style: { width: defaultNodeWidth }, data: { block: nextBlock, blockType: getString(nextBlock.type, 'transfer-sol') as SupportedBlockType, onSelect: handleSelectBlock, onRemove: removeBlock, onResizeWidth: handleNodeResize } }]);
 
     void runPersistedMutation(
       async () => {
@@ -933,7 +976,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
         );
       },
       {
-        refreshDraft: true,
+        refreshDraft: false,
       },
     );
   };
@@ -941,12 +984,16 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
   const removeBlock = (blockId: string): void => {
     setSelectedBlockId((current) => (current === blockId ? null : current));
 
+    setBlocks((current) => current.filter((block) => getBlockId(block) !== blockId));
+    setNodes((current) => current.filter((node) => node.id !== blockId));
+    setEdges((current) => current.filter((edge) => edge.source !== blockId && edge.target !== blockId));
+
     void runPersistedMutation(
       async () => {
         await deleteFlowBlock(flowId, blockId, accessToken);
       },
       {
-        refreshDraft: true,
+        refreshDraft: false,
       },
     );
   };
@@ -989,7 +1036,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
           );
         },
         {
-          refreshDraft: true,
+          refreshDraft: false,
         },
       );
     },
@@ -997,15 +1044,11 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
   );
 
   const removeEdge = (edgeId: string): void => {
-    const removedEdge = graphEdges.find((edge) => edge.id === edgeId);
-
-    if (!removedEdge) {
-      return;
-    }
-
-    const nextEdges = graphEdges.filter((edge) => edge.id !== edgeId);
-    setGraphEdges(nextEdges);
-    persistDependencies([removedEdge.target], nextEdges);
+    const removedEdge = edges.find((edge) => edge.id === edgeId);
+    if (!removedEdge) return;
+    const nextEdges = edges.filter((edge) => edge.id !== edgeId);
+    setEdges(nextEdges);
+    persistDependencies([removedEdge.target], nextEdges as FlowGraphEdge[]);
   };
   const changeBlockType = useCallback((blockId: string, nextType: SupportedBlockType): void => {
     const currentBlock = blocks.find((block) => getBlockId(block) === blockId);
@@ -1024,6 +1067,8 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
     ])[0];
 
     setConfigForm({ ...inflateBlockForEditor(nextConfig) });
+    setBlocks((current) => current.map((block) => getBlockId(block) === blockId ? nextConfig : block));
+    setNodes((current) => current.map((node) => node.id === blockId ? { ...node, data: { ...node.data, block: nextConfig, blockType: getString(nextConfig.type, 'transfer-sol') as SupportedBlockType } } : node));
 
     void runPersistedMutation(
       async () => {
@@ -1037,7 +1082,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
         );
       },
       {
-        refreshDraft: true,
+        refreshDraft: false,
       },
     );
   }, [accessToken, blocks, flowId, runPersistedMutation]);
@@ -1059,6 +1104,9 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
     ])[0];
 
     setConfigForm({ ...inflateBlockForEditor(nextConfig) });
+    setBlocks((current) => current.map((block) => getBlockId(block) === selectedBlockId ? nextConfig : block));
+    setNodes((current) => current.map((node) => node.id === selectedBlockId ? { ...node, data: { ...node.data, block: nextConfig, blockType: getString(nextConfig.type, 'transfer-sol') as SupportedBlockType } } : node));
+    setSelectedBlockId(null);
 
     void runPersistedMutation(
       async () => {
@@ -1072,7 +1120,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
         );
       },
       {
-        refreshDraft: true,
+        refreshDraft: false,
       },
     );
   }, [accessToken, configForm, flowId, runPersistedMutation, selectedBlockId]);
@@ -1258,11 +1306,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
 
   const handleNodeResize = useCallback((blockId: string, width: number): void => {
     const nextWidth = clamp(width, minNodeWidth, maxNodeWidth);
-
-    setNodeWidths((current) => ({
-      ...current,
-      [blockId]: nextWidth,
-    }));
+    setNodes((current) => current.map((n) => n.id === blockId ? { ...n, style: { ...n.style, width: nextWidth } } : n));
     void runPersistedMutation(
       async () => {
         await updateFlowBlock(
@@ -1280,170 +1324,61 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
     );
   }, [accessToken, flowId, runPersistedMutation]);
 
-  const handleNodesChange = useCallback((changes: NodeChange[]): void => {
-    const persistedLayoutUpdates = new Map<
-      string,
-      {
-        position?: { x: number; y: number };
-        uiWidth?: number;
-      }
-    >();
-    let didResize = false;
-    const widthUpdates: Record<string, number> = {};
-    const hasMetaChanges = changes.some(
-      (change) =>
-        (change.type === 'position' && change.dragging !== undefined) ||
-        (change.type === 'dimensions' && change.resizing !== undefined),
-    );
+  const handleNodesChange = useCallback((changes: NodeChange[]) => {
+    onNodesChangeReactFlow(changes);
+    const persistedLayoutUpdates = new Map<string, { position?: { x: number; y: number }; uiWidth?: number }>();
 
     changes.forEach((change) => {
-      if (change.type === 'select' && change.selected) {
-        setSelectedBlockId(change.id);
+      // Persist after native ReactFlow logic executes smoothing
+      if (change.type === 'position' && change.position && change.dragging === false) {
+        persistedLayoutUpdates.set(change.id, {
+          ...(persistedLayoutUpdates.get(change.id) ?? {}),
+          position: { x: change.position.x, y: change.position.y },
+        });
+      }
+      if (change.type === 'dimensions' && change.dimensions?.width && change.resizing === false) {
+        persistedLayoutUpdates.set(change.id, {
+          ...(persistedLayoutUpdates.get(change.id) ?? {}),
+          uiWidth: clamp(change.dimensions.width, minNodeWidth, maxNodeWidth),
+        });
       }
     });
-
-    setGraphNodes((current) => {
-      let next = current;
-
-      changes.forEach((change) => {
-        if (change.type === 'position' && change.position) {
-          const nextPosition = {
-            x: Math.max(0, change.position?.x ?? 0),
-            y: Math.max(0, change.position?.y ?? 0),
-          };
-          next = next.map((node) =>
-            node.id === change.id
-              ? {
-                ...node,
-                x: nextPosition.x,
-                y: nextPosition.y,
-              }
-              : node,
-          );
-
-          if (change.dragging === false) {
-            persistedLayoutUpdates.set(change.id, {
-              ...(persistedLayoutUpdates.get(change.id) ?? {}),
-              position: nextPosition,
-            });
-          }
-        }
-
-        if (change.type === 'dimensions' && change.dimensions?.width) {
-          didResize = true;
-          const nextWidth = clamp(change.dimensions.width, minNodeWidth, maxNodeWidth);
-          widthUpdates[change.id] = nextWidth;
-        }
-
-      });
-
-      return next;
-    });
-
-    if (hasMetaChanges) {
-      setNodeMeta((current) => {
-        const next = { ...current };
-
-        changes.forEach((change) => {
-          if (change.type === 'position' && change.dragging !== undefined) {
-            next[change.id] = { ...next[change.id], dragging: change.dragging };
-          }
-
-          if (change.type === 'dimensions' && change.resizing !== undefined) {
-            next[change.id] = { ...next[change.id], resizing: change.resizing };
-          }
-        });
-
-        return next;
-      });
-    }
-
-    if (didResize) {
-      setNodeWidths((current) => ({
-        ...current,
-        ...widthUpdates,
-      }));
-    }
 
     if (persistedLayoutUpdates.size > 0) {
       void runPersistedMutation(
         async () => {
           await Promise.all(
             [...persistedLayoutUpdates.entries()].map(([blockId, payload]) =>
-              updateFlowBlock(flowId, blockId, payload, accessToken),
-            ),
+              updateFlowBlock(flowId, blockId, payload, accessToken)
+            )
           );
         },
-        {
-          invalidateCompilation: false,
-        },
+        { invalidateCompilation: false }
       );
     }
-  }, [accessToken, flowId, runPersistedMutation]);
+  }, [onNodesChangeReactFlow, accessToken, flowId, runPersistedMutation]);
 
   const handleEdgesChange = (changes: EdgeChange[]): void => {
+    onEdgesChangeReactFlow(changes);
     const removedIds = changes.filter((change) => change.type === 'remove').map((change) => change.id);
-
-    if (removedIds.length === 0) {
-      return;
-    }
-
-    const removedEdges = graphEdges.filter((edge) => removedIds.includes(edge.id));
-    const nextEdges = graphEdges.filter((edge) => !removedIds.includes(edge.id));
-    setGraphEdges(nextEdges);
-    persistDependencies(
-      removedEdges.map((edge) => edge.target),
-      nextEdges,
-    );
+    if (removedIds.length === 0) return;
+    const removedEdges = edges.filter((edge) => removedIds.includes(edge.id));
+    const nextEdges = edges.filter((edge) => !removedIds.includes(edge.id));
+    persistDependencies(removedEdges.map((edge) => edge.target), nextEdges as FlowGraphEdge[]);
   };
 
   const handleConnect = (connection: Connection): void => {
     const sourceId = connection.source ?? '';
     const targetId = connection.target ?? '';
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    if (edges.some((edge) => edge.source === sourceId && edge.target === targetId)) return;
 
-    if (!sourceId || !targetId || sourceId === targetId) {
-      return;
-    }
-
-    if (graphEdges.some((edge) => edge.source === sourceId && edge.target === targetId)) {
-      return;
-    }
-
-    const nextEdges = [...graphEdges, { id: makeEdgeId(sourceId, targetId, graphEdges.length), source: sourceId, target: targetId }];
-    setGraphEdges(nextEdges);
-    persistDependencies([targetId], nextEdges);
+    const nextEdges = [...edges, { id: makeEdgeId(sourceId, targetId, edges.length), source: sourceId, target: targetId, type: 'smoothstep' }];
+    setEdges(nextEdges);
+    persistDependencies([targetId], nextEdges as FlowGraphEdge[]);
   };
 
-  const reactFlowNodes = useMemo<Array<Node<FlowBlockNodeData>>>(() => blocks.map((block, index) => {
-    const blockId = getBlockId(block) || `legacy-block-${index}`;
-    const graphNode = graphNodeMap.get(blockId) ?? getDefaultNodePosition(index);
-    const blockType = getString(block.type, 'transfer-sol') as SupportedBlockType;
-    const meta = nodeMeta[blockId] || {};
 
-    return {
-      id: blockId,
-      type: 'flowBlock',
-      position: { x: graphNode.x, y: graphNode.y },
-      style: { width: getNodeWidth(blockId) },
-      selected: selectedBlockId === blockId,
-      dragging: meta.dragging,
-      resizing: meta.resizing,
-      data: {
-        block,
-        blockType,
-        onSelect: handleSelectBlock,
-        onRemove: removeBlock,
-        onResizeWidth: handleNodeResize,
-      },
-    };
-  }), [blocks, graphNodeMap, handleSelectBlock, nodeMeta, nodeWidths, removeBlock, handleNodeResize, selectedBlockId]);
-
-  const reactFlowEdges: Edge[] = graphEdges.map((edge) => ({
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    type: 'smoothstep',
-  }));
 
   if (isLoadingFlow) {
     return <p className="hint-text">Loading flow builder...</p>;
@@ -1510,8 +1445,8 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
           <div className="flow-canvas-shell">
             <div className="flow-canvas-flow">
               <ReactFlow
-                nodes={reactFlowNodes}
-                edges={reactFlowEdges}
+                nodes={nodes}
+                edges={edges}
                 nodeTypes={flowNodeTypes}
                 onNodesChange={handleNodesChange}
                 onEdgesChange={handleEdgesChange}
@@ -1521,13 +1456,11 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
                 nodesDraggable
                 nodesConnectable
                 elementsSelectable
-                panOnDrag={false}
                 defaultViewport={{ x: 0, y: 0, zoom: 1 }}
                 minZoom={0.45}
                 maxZoom={1.5}
                 proOptions={{ hideAttribution: true }}
                 deleteKeyCode={null}
-                selectionOnDrag={false}
               >
                 <Background gap={20} size={2} color="#d9d9d9" />
                 <Controls position="bottom-right" showInteractive={false} />
@@ -1594,10 +1527,10 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
             </aside>
           </div>
 
-          {graphEdges.length > 0 ? (
+          {edges.length > 0 ? (
             <div className="flow-edge-list">
               <p className="hint-text">Links</p>
-              {graphEdges.map((edge) => (
+              {edges.map((edge) => (
                 <div key={edge.id} className="flow-edge-item">
                   <span>
                     {edge.source.slice(0, 6)}... to {edge.target.slice(0, 6)}...
