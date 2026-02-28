@@ -26,7 +26,7 @@ This repository contains:
 - [What Was Built](#what-was-built)
 - [How It Works](#how-it-works)
 - [Realms / SPL Governance Integration](#realms--spl-governance-integration)
-- [Audius Integration](#audius-integration)
+- [Realms Extension Surface](#realms-extension-surface)
 - [Key Snippets](#key-snippets)
 - [Project Structure](#project-structure)
 - [Setup](#setup)
@@ -371,23 +371,23 @@ Daometer adds the missing orchestration layer:
 - flow-scoped monitoring and automation
 - a simpler UX for preparing wallet-signed governance actions
 
-## Audius Integration
+## Realms Extension Surface
 
 ### Current Status
 
-There is **no Audius-specific integration committed in this repository today**.
+Daometer currently ships a **generic extension path** for protocol-specific actions, rather than a dedicated adapter per protocol.
 
 That means:
 
-- there is no direct Audius API client
-- there is no Audius smart contract adapter
-- there is no dedicated Audius block type in the flow compiler
+- there is no protocol-specific adapter layer beyond the built-in Realms-oriented blocks
+- there is no dedicated block type for every downstream Solana protocol
+- advanced integrations currently route through the generic `custom-instruction` path
 
 This section is intentionally explicit so the README stays accurate.
 
-### Where Audius Fits
+### Where Custom Integrations Fit
 
-The correct integration surface for Audius in the current architecture is the `custom-instruction` block plus workflow automation.
+The correct integration surface in the current architecture is the `custom-instruction` block plus workflow automation.
 
 Why:
 
@@ -395,11 +395,11 @@ Why:
 - the compiler can include custom program/account metadata in proposal instructions
 - workflows can watch proposal state and trigger follow-up actions
 
-That means an Audius-specific extension would likely be implemented by:
+That means a protocol-specific extension would likely be implemented by:
 
-1. adding an **Audius block type** in the client builder
+1. adding a dedicated block type in the client builder
 2. mapping that block into a compiled instruction or worker action
-3. optionally adding an Audius integration client under [`server/src/shared/integrations`](/Users/chigozzdev/Desktop/daometer/server/src/shared/integrations)
+3. optionally adding an integration client under [`server/src/shared/integrations`](/Users/chigozzdev/Desktop/daometer/server/src/shared/integrations)
 
 ### What Exists Today That Enables It
 
@@ -418,7 +418,7 @@ return {
 };
 ```
 
-That is the extension point Daometer would use for Audius-specific governance automation.
+That is the extension point Daometer uses for custom protocol-specific governance automation.
 
 ### Shared Integrations Directory
 
@@ -426,7 +426,7 @@ Current shared integrations:
 
 - [server/src/shared/integrations/resend.client.ts](/Users/chigozzdev/Desktop/daometer/server/src/shared/integrations/resend.client.ts)
 
-If Audius is added later, it belongs in this same integration layer.
+Future protocol-specific adapters belong in this same integration layer.
 
 ## Key Snippets
 
@@ -713,7 +713,6 @@ Representative endpoints:
 
 ## Known Limitations
 
-- Audius-specific integration is not implemented yet.
 - Not every Solana / Realms instruction is exposed as a dedicated block; unsupported workflows fall back to `custom-instruction`.
 - The client bundle is currently large enough to trigger Vite chunk-size warnings.
 - Production-grade guardrails around irreversible governance actions still need deeper review.
