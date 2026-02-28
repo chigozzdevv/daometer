@@ -4,6 +4,8 @@ import {
   getGovernance,
   getNativeTreasuryAddress,
   getProgramDataAddress,
+  getRealm,
+  getTokenOwnerRecord,
   getTokenOwnerRecordAddress,
   GovernanceConfig,
   VoteThreshold,
@@ -99,6 +101,49 @@ const sendInstructionBatch = async (
     commitment: env.SOLANA_COMMITMENT as Commitment,
     skipPreflight: false,
   });
+};
+
+const assertProposalCreatorHasEnoughGoverningTokens = async (input: {
+  connection: Connection;
+  governanceAddress: PublicKey;
+  realmAddress: PublicKey;
+  governingTokenMint: PublicKey;
+  tokenOwnerRecordAddress: PublicKey;
+  tokenOwnerRecordExists: boolean;
+}): Promise<void> => {
+  const [governance, realm] = await Promise.all([
+    getGovernance(input.connection, input.governanceAddress),
+    getRealm(input.connection, input.realmAddress),
+  ]);
+
+  const isCouncilMint = Boolean(
+    realm.account.config.councilMint && realm.account.config.councilMint.equals(input.governingTokenMint),
+  );
+  const minTokensToCreateProposal = isCouncilMint
+    ? governance.account.config.minCouncilTokensToCreateProposal
+    : governance.account.config.minCommunityTokensToCreateProposal;
+  const minimumRequired = BigInt(minTokensToCreateProposal.toString());
+
+  if (minimumRequired === 0n) {
+    return;
+  }
+
+  let depositedAmount = 0n;
+
+  if (input.tokenOwnerRecordExists) {
+    const tokenOwnerRecord = await getTokenOwnerRecord(input.connection, input.tokenOwnerRecordAddress);
+    depositedAmount = BigInt(tokenOwnerRecord.account.governingTokenDepositAmount.toString());
+  }
+
+  if (depositedAmount >= minimumRequired) {
+    return;
+  }
+
+  throw new AppError(
+    `You need at least ${minimumRequired.toString()} deposited ${isCouncilMint ? 'council' : 'community'} governing tokens to create a proposal in this DAO. Current deposited amount: ${depositedAmount.toString()}. Deposit governing tokens first, then try again.`,
+    400,
+    'ONCHAIN_PROPOSAL_CREATOR_INSUFFICIENT_TOKENS',
+  );
 };
 
 const parseStoredPayload = (instruction: ProposalInstruction): Record<string, unknown> => {
@@ -527,8 +572,18 @@ export const createOnchainProposalFromStoredInstructions = async (
   );
 
   const tokenOwnerRecordInfo = await connection.getAccountInfo(tokenOwnerRecordAddress, env.SOLANA_COMMITMENT as Commitment);
+  const tokenOwnerRecordExists = Boolean(tokenOwnerRecordInfo);
 
-  if (!tokenOwnerRecordInfo) {
+  await assertProposalCreatorHasEnoughGoverningTokens({
+    connection,
+    governanceAddress,
+    realmAddress,
+    governingTokenMint,
+    tokenOwnerRecordAddress,
+    tokenOwnerRecordExists,
+  });
+
+  if (!tokenOwnerRecordExists) {
     const createTorInstructions: TransactionInstruction[] = [];
 
     await withCreateTokenOwnerRecord(
@@ -657,8 +712,18 @@ export const prepareOnchainProposalFromStoredInstructions = async (
   );
 
   const tokenOwnerRecordInfo = await connection.getAccountInfo(tokenOwnerRecordAddress, env.SOLANA_COMMITMENT as Commitment);
+  const tokenOwnerRecordExists = Boolean(tokenOwnerRecordInfo);
 
-  if (!tokenOwnerRecordInfo) {
+  await assertProposalCreatorHasEnoughGoverningTokens({
+    connection,
+    governanceAddress,
+    realmAddress,
+    governingTokenMint,
+    tokenOwnerRecordAddress,
+    tokenOwnerRecordExists,
+  });
+
+  if (!tokenOwnerRecordExists) {
     const createTorInstructions: TransactionInstruction[] = [];
 
     await withCreateTokenOwnerRecord(
