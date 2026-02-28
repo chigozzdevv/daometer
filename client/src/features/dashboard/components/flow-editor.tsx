@@ -67,7 +67,7 @@ const supportedBlockTypes: Array<{ value: SupportedBlockType; label: string }> =
 type FlowBlockNodeData = {
   block: FlowBlockInput;
   blockType: SupportedBlockType;
-  orderIndex: number;
+  onSelect: (blockId: string) => void;
   onRemove: (blockId: string) => void;
   onResizeWidth: (blockId: string, width: number) => void;
 };
@@ -89,10 +89,12 @@ const FlowBlockNode = memo(({ id, data, selected }: NodeProps<FlowBlockNodeData>
         onResizeEnd={(_, params) => data.onResizeWidth(blockId, getNumber((params as { width?: number }).width, defaultNodeWidth))}
       />
       <Handle type="target" position={Position.Left} />
-      <div className="flow-block-node">
+      <div
+        className="flow-block-node"
+        onClick={() => data.onSelect(blockId)}
+      >
         <div className="flow-node-header">
           <div className="flow-node-title">
-            <span className="status-chip status-chip--gray">#{data.orderIndex > 0 ? data.orderIndex : '-'}</span>
             <strong>{getString(data.block.label, 'Untitled block')}</strong>
           </div>
 
@@ -1429,12 +1431,12 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
       data: {
         block,
         blockType,
-        orderIndex: orderingPreview.ids.findIndex((id) => id === blockId) + 1,
+        onSelect: handleSelectBlock,
         onRemove: removeBlock,
         onResizeWidth: handleNodeResize,
       },
     };
-  }), [blocks, graphNodeMap, nodeMeta, nodeWidths, orderingPreview.ids, removeBlock, handleNodeResize, selectedBlockId]);
+  }), [blocks, graphNodeMap, handleSelectBlock, nodeMeta, nodeWidths, removeBlock, handleNodeResize, selectedBlockId]);
 
   const reactFlowEdges: Edge[] = graphEdges.map((edge) => ({
     id: edge.id,
@@ -1519,6 +1521,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
                 nodesDraggable
                 nodesConnectable
                 elementsSelectable
+                panOnDrag={false}
                 defaultViewport={{ x: 0, y: 0, zoom: 1 }}
                 minZoom={0.45}
                 maxZoom={1.5}
@@ -1527,7 +1530,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
                 selectionOnDrag={false}
               >
                 <Background gap={20} size={2} color="#d9d9d9" />
-                <Controls position="bottom-right" />
+                <Controls position="bottom-right" showInteractive={false} />
               </ReactFlow>
             </div>
 
