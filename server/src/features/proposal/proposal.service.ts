@@ -60,6 +60,14 @@ export type CreateProposalInput = {
 
 type ProposalState = 'draft' | 'voting' | 'succeeded' | 'defeated' | 'cancelled' | 'executed' | 'execution-error';
 
+const toUnknownErrorMessage = (error: unknown): string => {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  return 'Unexpected on-chain preparation error';
+};
+
 const riskLevelFromScore = (score: number): 'safe' | 'warning' | 'critical' => {
   if (score <= 30) {
     return 'safe';
@@ -397,21 +405,35 @@ export const createProposalOnchain = async (
     throw new AppError('DAO not found', 404, 'DAO_NOT_FOUND');
   }
 
-  const result = await createOnchainProposalFromStoredInstructions({
-    governanceProgramId: input.governanceProgramId ?? dao.governanceProgramId,
-    programVersion: input.programVersion,
-    realmAddress: input.realmAddress,
-    governanceAddress: input.governanceAddress,
-    governingTokenMint: input.governingTokenMint,
-    proposalName: proposal.title,
-    descriptionLink: input.descriptionLink ?? 'https://docs.realms.today',
-    holdUpSeconds: proposal.holdUpSeconds,
-    instructions: proposal.instructions,
-    optionIndex: input.optionIndex,
-    useDenyOption: input.useDenyOption,
-    rpcUrl: input.rpcUrl,
-    signOff: input.signOff,
-  });
+  let result;
+
+  try {
+    result = await createOnchainProposalFromStoredInstructions({
+      governanceProgramId: input.governanceProgramId ?? dao.governanceProgramId,
+      programVersion: input.programVersion,
+      realmAddress: input.realmAddress,
+      governanceAddress: input.governanceAddress,
+      governingTokenMint: input.governingTokenMint,
+      proposalName: proposal.title,
+      descriptionLink: input.descriptionLink ?? 'https://docs.realms.today',
+      holdUpSeconds: proposal.holdUpSeconds,
+      instructions: proposal.instructions,
+      optionIndex: input.optionIndex,
+      useDenyOption: input.useDenyOption,
+      rpcUrl: input.rpcUrl,
+      signOff: input.signOff,
+    });
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+
+    throw new AppError(
+      `On-chain proposal creation failed: ${toUnknownErrorMessage(error)}`,
+      400,
+      'ONCHAIN_PROPOSAL_CREATE_FAILED',
+    );
+  }
 
   proposal.onchainExecution = {
     enabled: true,
@@ -598,23 +620,37 @@ export const prepareProposalOnchainCreate = async (
 
   assertInstructionsAreOnchainCreatable(proposal.instructions);
 
-  const result = await prepareOnchainProposalFromStoredInstructions({
-    governanceProgramId: input.governanceProgramId ?? dao.governanceProgramId,
-    programVersion: input.programVersion,
-    realmAddress: input.realmAddress,
-    governanceAddress: input.governanceAddress,
-    governingTokenMint: input.governingTokenMint,
-    proposalName: proposal.title,
-    descriptionLink: input.descriptionLink ?? 'https://docs.realms.today',
-    holdUpSeconds: proposal.holdUpSeconds,
-    instructions: proposal.instructions,
-    optionIndex: input.optionIndex,
-    useDenyOption: input.useDenyOption,
-    rpcUrl: input.rpcUrl,
-    signOff: input.signOff,
-    authorityWallet: actor.walletAddress,
-    payerWallet: actor.walletAddress,
-  });
+  let result;
+
+  try {
+    result = await prepareOnchainProposalFromStoredInstructions({
+      governanceProgramId: input.governanceProgramId ?? dao.governanceProgramId,
+      programVersion: input.programVersion,
+      realmAddress: input.realmAddress,
+      governanceAddress: input.governanceAddress,
+      governingTokenMint: input.governingTokenMint,
+      proposalName: proposal.title,
+      descriptionLink: input.descriptionLink ?? 'https://docs.realms.today',
+      holdUpSeconds: proposal.holdUpSeconds,
+      instructions: proposal.instructions,
+      optionIndex: input.optionIndex,
+      useDenyOption: input.useDenyOption,
+      rpcUrl: input.rpcUrl,
+      signOff: input.signOff,
+      authorityWallet: actor.walletAddress,
+      payerWallet: actor.walletAddress,
+    });
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+
+    throw new AppError(
+      `On-chain proposal preparation failed: ${toUnknownErrorMessage(error)}`,
+      400,
+      'ONCHAIN_PROPOSAL_PREPARE_FAILED',
+    );
+  }
 
   return {
     proposal,
