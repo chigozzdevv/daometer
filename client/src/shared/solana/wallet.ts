@@ -1,4 +1,5 @@
 import { Buffer } from 'buffer';
+import bs58 from 'bs58';
 import { Connection, Transaction, VersionedTransaction } from '@solana/web3.js';
 
 export type SolanaProviderConnectResult = {
@@ -28,6 +29,24 @@ const bytesToBase64 = (value: Uint8Array): string => {
   return Buffer.from(value).toString('base64');
 };
 
+const decodeSerializedTransaction = (value: string): Uint8Array | null => {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    return bs58.decode(trimmed);
+  } catch {
+    try {
+      return base64ToBytes(trimmed);
+    } catch {
+      return null;
+    }
+  }
+};
+
 export const getSolanaProvider = (): SolanaProvider | null => {
   if (typeof window === 'undefined') {
     return null;
@@ -46,6 +65,54 @@ export const getSolanaProvider = (): SolanaProvider | null => {
   }
 
   return candidate;
+};
+
+const getProviderCandidates = (provider: SolanaProvider): SolanaProvider[] => {
+  if (typeof window === 'undefined') {
+    return [provider];
+  }
+
+  const walletWindow = window as unknown as {
+    solana?: SolanaProvider;
+    phantom?: {
+      solana?: SolanaProvider;
+    };
+  };
+
+  return [provider, walletWindow.solana, walletWindow.phantom?.solana].filter(
+    (candidate, index, array): candidate is SolanaProvider =>
+      Boolean(candidate) && array.findIndex((entry) => entry === candidate) === index,
+  );
+};
+
+const getSignAndSendTransactionMethod = (
+  provider: SolanaProvider,
+): NonNullable<SolanaProvider['signAndSendTransaction']> | null => {
+  const candidate = getProviderCandidates(provider).find(
+    (entry) => typeof entry.signAndSendTransaction === 'function',
+  );
+
+  if (!candidate) {
+    return null;
+  }
+
+  const method = candidate.signAndSendTransaction;
+  return typeof method === 'function' ? method.bind(candidate) : null;
+};
+
+const getSignTransactionMethod = (
+  provider: SolanaProvider,
+): NonNullable<SolanaProvider['signTransaction']> | null => {
+  const candidate = getProviderCandidates(provider).find(
+    (entry) => typeof entry.signTransaction === 'function',
+  );
+
+  if (!candidate) {
+    return null;
+  }
+
+  const method = candidate.signTransaction;
+  return typeof method === 'function' ? method.bind(candidate) : null;
 };
 
 const deserializePreparedTransaction = (transactionBase64: string): Transaction | VersionedTransaction => {
@@ -74,7 +141,25 @@ const serializeSignedTransaction = (
     return signedTransaction;
   }
 
+  if (typeof signedTransaction === 'string') {
+    const decoded = decodeSerializedTransaction(signedTransaction);
+
+    if (decoded) {
+      return decoded;
+    }
+  }
+
   if (signedTransaction && typeof signedTransaction === 'object') {
+    const maybeSignedTransaction = (signedTransaction as { transaction?: unknown }).transaction;
+
+    if (typeof maybeSignedTransaction === 'string') {
+      const decoded = decodeSerializedTransaction(maybeSignedTransaction);
+
+      if (decoded) {
+        return decoded;
+      }
+    }
+
     const maybeSerialize = (signedTransaction as { serialize?: () => Uint8Array | ArrayLike<number> }).serialize;
 
     if (typeof maybeSerialize === 'function') {
@@ -129,8 +214,10 @@ export const sendPreparedTransaction = async (
     ((window as unknown as { phantom?: { solana?: SolanaProvider } }).phantom?.solana === provider);
   const buildPreparedTransaction = (): Transaction | VersionedTransaction =>
     deserializePreparedTransaction(transactionBase64);
+  const signAndSendTransaction = getSignAndSendTransactionMethod(provider);
+  const signTransaction = getSignTransactionMethod(provider);
 
-  if (typeof provider.signAndSendTransaction === 'function') {
+  if (signAndSendTransaction) {
     const directVariants: Array<{ label: string; payload: unknown; options?: Record<string, unknown> }> = [
       {
         label: 'signAndSend(transaction-object)',
@@ -162,7 +249,7 @@ export const sendPreparedTransaction = async (
 
     for (const variant of directVariants) {
       try {
-        const result = await provider.signAndSendTransaction(variant.payload, variant.options);
+        const result = await signAndSendTransaction(variant.payload, variant.options);
         const signature = extractSignature(result);
 
         if (signature) {
@@ -176,10 +263,10 @@ export const sendPreparedTransaction = async (
     }
   }
 
-  if (typeof provider.signTransaction === 'function' && options.rpcUrl) {
+  if (signTransaction && options.rpcUrl) {
     try {
       const transactionForSigning = buildPreparedTransaction();
-      const signedTransaction = await provider.signTransaction(transactionForSigning);
+      const signedTransaction = await signTransaction(transactionForSigning);
       const serialized = serializeSignedTransaction(signedTransaction, transactionForSigning);
       const connection = new Connection(options.rpcUrl, 'confirmed');
       const signature = await connection.sendRawTransaction(serialized, {
@@ -204,71 +291,42 @@ export const sendPreparedTransaction = async (
         `signTransaction+sendRawTransaction: ${error instanceof Error ? error.message : 'unknown signTransaction error'}`,
       );
     }
+  } else if (!signTransaction) {
+    errors.push('signTransaction+sendRawTransaction: signTransaction unavailable on injected wallet provider');
   }
 
-  if (typeof provider.request === 'function') {
-    const requestVariants: Array<{ label: string; params: unknown }> = [
-      { label: 'request(transaction-base58-string)', params: transactionBase58 },
-      { label: 'request([transaction-base58-string])', params: [transactionBase58] },
-      {
-        label: 'request(transaction-base58-object)',
-        params: {
-          transaction: transactionBase58,
-          options: {
-            skipPreflight: false,
-            preflightCommitment: 'confirmed',
-          },
-        },
-      },
-      {
-        label: 'request(message-object)',
+  if (typeof provider.request === 'function' && options.rpcUrl) {
+    try {
+      const transactionForSigning = buildPreparedTransaction();
+      const signedTransaction = await provider.request({
+        method: 'signTransaction',
         params: {
           message: transactionMessage,
-          options: {
-            skipPreflight: false,
-            preflightCommitment: 'confirmed',
-          },
         },
-      },
-      {
-        label: 'request(message-base58-transaction-object)',
-        params: {
-          message: transactionBase58,
-          options: {
-            skipPreflight: false,
-            preflightCommitment: 'confirmed',
-          },
-        },
-      },
-      {
-        label: 'request(transaction-base64-object)',
-        params: {
-          transaction: transactionBase64,
-          encoding: 'base64',
-          options: {
-            skipPreflight: false,
-            preflightCommitment: 'confirmed',
-          },
-        },
-      },
-    ];
+      });
+      const serialized = serializeSignedTransaction(signedTransaction, transactionForSigning);
+      const connection = new Connection(options.rpcUrl, 'confirmed');
+      const signature = await connection.sendRawTransaction(serialized, {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+      });
 
-    for (const variant of requestVariants) {
-      try {
-        const result = await provider.request({
-          method: 'signAndSendTransaction',
-          params: variant.params,
-        });
-        const signature = extractSignature(result);
-
-        if (signature) {
-          return signature;
-        }
-      } catch (error) {
-        errors.push(
-          `${variant.label}: ${error instanceof Error ? error.message : 'unknown provider.request error'}`,
+      if (options.recentBlockhash && typeof options.lastValidBlockHeight === 'number') {
+        await connection.confirmTransaction(
+          {
+            signature,
+            blockhash: options.recentBlockhash,
+            lastValidBlockHeight: options.lastValidBlockHeight,
+          },
+          'confirmed',
         );
       }
+
+      return signature;
+    } catch (error) {
+      errors.push(
+        `request(signTransaction-message): ${error instanceof Error ? error.message : 'unknown provider.request signTransaction error'}`,
+      );
     }
   }
 
