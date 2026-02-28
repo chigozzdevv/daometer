@@ -272,6 +272,6 @@ export const sendPreparedTransaction = async (
     }
   }
 
-  const details = errors.length > 0 ? ` Attempts: ${errors.slice(0, 3).join(' | ')}` : '';
+  const details = errors.length > 0 ? ` Attempts: ${errors.join(' | ')}` : '';
   throw new Error(`Wallet could not sign and send the prepared transaction.${details}`);
 };

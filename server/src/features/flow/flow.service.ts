@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { env } from '@/config/env.config';
 import {
   getOrderedFlowBlocksForExecution,
   replaceFlowBlocksFromSnapshot,
@@ -518,7 +519,7 @@ export const publishFlow = async (
         governanceAddress: resolvedOnchainCreate.governanceAddress,
         proposalAddress: prepared.proposalAddress,
         transactionAddresses: prepared.transactionAddresses,
-        rpcUrl: resolvedOnchainCreate.rpcUrl,
+        rpcUrl: resolvedOnchainCreate.rpcUrl ?? env.SOLANA_RPC_URL,
         requireSimulation: resolvedOnchainCreate.requireSimulation,
       },
     };
