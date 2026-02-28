@@ -13,10 +13,26 @@ const optionalStringFromEnv = () =>
     return trimmed.length === 0 ? undefined : trimmed;
   }, z.string().optional());
 
+const optionalStringArrayFromCsvEnv = () =>
+  z.preprocess((value) => {
+    if (typeof value !== 'string') {
+      return value;
+    }
+
+    const values = value
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+
+    return values.length > 0 ? values : undefined;
+  }, z.array(z.string().min(1)).optional());
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   API_PREFIX: z.string().trim().min(1).default('/api/v1'),
+  CORS_ORIGINS: optionalStringArrayFromCsvEnv(),
+  CORS_CREDENTIALS: z.coerce.boolean().default(false),
   MONGODB_URI: z.string().trim().min(1),
   SOLANA_RPC_URL: z.string().trim().url().default('https://api.devnet.solana.com'),
   SOLANA_COMMITMENT: z.enum(['processed', 'confirmed', 'finalized']).default('confirmed'),
