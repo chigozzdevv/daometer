@@ -1,240 +1,725 @@
-# Daometer Backend
+# Daometer
 
-Production-style Express + MongoDB backend and worker for DAO proposal automation.
+Daometer is a non-custodial governance automation layer for Solana DAOs built around **Realms / SPL Governance**.
 
-## Stack
+It gives DAO operators a guided path to:
 
-- TypeScript
-- Express
-- MongoDB (Mongoose)
-- Zod request validation
-- JWT auth (access + refresh)
-- Background worker for proposal execution jobs
-- Rule-based workflow engine (conditions + actions)
-- Resend email integration for workflow notifications
+- connect a wallet
+- create a DAO (Realm) on Solana
+- create governance accounts and treasury primitives
+- manage governance token and voting power flows
+- author proposal logic visually
+- compile that logic into ordered governance instructions
+- publish and sign proposals for Realms-compatible governance
+- monitor proposal state and automate post-vote actions with a background worker
+
+This repository contains:
+
+- a **React + TypeScript client** in [`/client`](/Users/chigozzdev/Desktop/daometer/client)
+- an **Express + MongoDB backend** in [`/server`](/Users/chigozzdev/Desktop/daometer/server)
+- a **background worker** in [`/server/src/worker`](/Users/chigozzdev/Desktop/daometer/server/src/worker) that evaluates workflows and processes execution jobs
+
+## Table of Contents
+
+- [About](#about)
+- [Core Concepts](#core-concepts)
+- [What Was Built](#what-was-built)
+- [How It Works](#how-it-works)
+- [Realms / SPL Governance Integration](#realms--spl-governance-integration)
+- [Audius Integration](#audius-integration)
+- [Key Snippets](#key-snippets)
+- [Project Structure](#project-structure)
+- [Setup](#setup)
+- [Scripts](#scripts)
+- [API Surface](#api-surface)
+- [Operational Notes](#operational-notes)
+- [Known Limitations](#known-limitations)
+
+## About
+
+Daometer is built as an orchestration layer on top of Realms rather than a replacement for Realms.
+
+The project focuses on the part that is still difficult for many DAO operators:
+
+- translating intent into proposal instructions
+- sequencing setup actions correctly
+- managing proposal lifecycle automation
+- reducing repetitive manual work around treasury actions, config changes, upgrades, and execution follow-through
+
+The core product flow is:
+
+1. Create or register a DAO.
+2. Configure governance and voting primitives.
+3. Build a reusable governance flow visually.
+4. Compile the flow into proposal instructions.
+5. Publish it as a proposal.
+6. Monitor and automate the resulting proposal lifecycle.
+
+## Core Concepts
+
+The codebase is much easier to understand if these terms are kept separate:
+
+### DAO / Realm
+
+This is the top-level governance container. In Realms terms, this is the **Realm**.
+
+It represents:
+
+- the DAO identity
+- the governing token relationship
+- the main governance namespace where proposals live
+
+### Governance
+
+A governance account defines the rules for a set of proposals and owns a **native treasury**.
+
+It controls:
+
+- vote thresholds
+- voting duration
+- hold-up time
+- vote tipping behavior
+- which treasury or governed assets proposals operate against
+
+### Flow
+
+A flow is a reusable proposal blueprint inside Daometer.
+
+A flow stores:
+
+- ordered action blocks
+- graph node layout
+- dependency edges between actions
+- the selected DAO / governance context
+
+Flows are authoring-time objects. They are not votes by themselves.
+
+### Proposal
+
+A proposal is the concrete governance decision generated from a flow.
+
+Publishing a flow creates:
+
+- an internal proposal record in Daometer
+- optionally, a real on-chain proposal creation path for Realms-compatible governance
+
+This is the object that people eventually vote on.
+
+### Workflow
+
+A workflow is the automation policy attached to a flow.
+
+It watches proposals created from that flow and can respond to proposal lifecycle changes such as:
+
+- voting started
+- proposal succeeded
+- proposal defeated
+- execution eligibility
+
+So the relationship is:
+
+- **Flow** authors the proposal logic
+- **Proposal** is the runtime governance object
+- **Workflow** monitors proposals created from that flow
+
+## What Was Built
+
+The current codebase includes:
+
+### Wallet-based authentication
+
+- challenge/verify flow using wallet signatures
+- JWT session handling after successful wallet verification
+
+### DAO creation + registration
+
+- internal DAO records
+- wallet-signed on-chain Realm creation
+- wallet-signed community mint preparation
+- wallet-signed governance account + native treasury preparation
+
+### Governance token operations
+
+- prepare mint distribution transactions
+- prepare mint authority changes
+
+### Voting power operations
+
+- prepare deposit transactions
+- prepare withdraw transactions
+- prepare delegate transactions
+
+### Flow authoring
+
+- drag-and-drop builder using **React Flow**
+- reusable block types for common governance operations
+- persisted graph layout + node widths
+
+### Flow compilation
+
+- risk scoring
+- warning generation
+- topological ordering based on block links
+- instruction generation for proposal publication
+
+### Proposal publication
+
+- internal proposal records
+- wallet-prepared on-chain proposal creation support for Realms-compatible governance
+
+### Workflow automation
+
+- flow-scoped workflow rules
+- proposal lifecycle evaluation
+- worker-based queue synchronization and execution processing
+
+## How It Works
+
+This is the intended end-to-end lifecycle of the product.
+
+### 1. Connect wallet and authenticate
+
+The client requests a challenge from the backend, signs it with the connected wallet, and exchanges the signature for access/refresh tokens.
+
+Relevant files:
+
+- [client/src/features/auth/api/api.ts](/Users/chigozzdev/Desktop/daometer/client/src/features/auth/api/api.ts)
+- [client/src/features/auth/components/card.tsx](/Users/chigozzdev/Desktop/daometer/client/src/features/auth/components/card.tsx)
+- [server/src/features/auth/auth.routes.ts](/Users/chigozzdev/Desktop/daometer/server/src/features/auth/auth.routes.ts)
+- [server/src/features/auth/auth.service.ts](/Users/chigozzdev/Desktop/daometer/server/src/features/auth/auth.service.ts)
+
+Key route wiring:
+
+```ts
+authRouter.post('/challenge', validateRequest(createChallengeSchema), authController.challenge);
+authRouter.post('/verify', validateRequest(verifyChallengeSchema), authController.verify);
+```
+
+### 2. Create a DAO (Realm)
+
+Daometer supports both:
+
+- creating an internal DAO record
+- preparing a wallet-signed on-chain Realm creation transaction
+
+The backend prepares transactions; the connected wallet signs and submits them.
+
+Relevant files:
+
+- [server/src/features/dao/dao.routes.ts](/Users/chigozzdev/Desktop/daometer/server/src/features/dao/dao.routes.ts)
+- [server/src/features/dao/dao.service.ts](/Users/chigozzdev/Desktop/daometer/server/src/features/dao/dao.service.ts)
+- [client/src/features/dashboard/pages/daos.tsx](/Users/chigozzdev/Desktop/daometer/client/src/features/dashboard/pages/daos.tsx)
+- [client/src/features/dashboard/api/api.ts](/Users/chigozzdev/Desktop/daometer/client/src/features/dashboard/api/api.ts)
+
+Key routes:
+
+```ts
+daoRouter.post('/onchain-create', requireAuth, validateRequest(createDaoOnchainSchema), daoController.createOnchain);
+daoRouter.post('/prepare-community-mint', requireAuth, validateRequest(prepareCommunityMintSchema), daoController.prepareCommunityMint);
+daoRouter.post('/:daoId/prepare-governance', requireAuth, validateRequest(prepareGovernanceCreateSchema), daoController.prepareGovernance);
+```
+
+### 3. Create governance + treasury primitives
+
+After a Realm exists, the user prepares governance-specific transactions:
+
+- create governance account
+- create native treasury
+- optionally distribute governance tokens
+- optionally transfer mint authority
+
+This gives the DAO the minimum primitives needed for proposal-based operations.
+
+### 4. Manage governance token and voting power
+
+Daometer exposes wallet-signed preparation endpoints for:
+
+- deposit governance tokens
+- withdraw deposited voting power
+- delegate voting power to another wallet
+
+These are the mechanics that make a wallet participate in Realms voting with actual governance power.
+
+### 5. Author a flow
+
+Flows are reusable proposal blueprints. Each flow contains:
+
+- `blocks`: the logical actions
+- `graph.nodes`: layout positions
+- `graph.edges`: execution dependencies
+
+The builder is powered by **React Flow**.
+
+Relevant files:
+
+- [client/src/features/dashboard/components/flow-editor.tsx](/Users/chigozzdev/Desktop/daometer/client/src/features/dashboard/components/flow-editor.tsx)
+- [client/src/features/dashboard/pages/flows.tsx](/Users/chigozzdev/Desktop/daometer/client/src/features/dashboard/pages/flows.tsx)
+
+Current block types:
+
+- `transfer-sol`
+- `transfer-spl`
+- `set-governance-config`
+- `program-upgrade`
+- `create-token-account`
+- `create-stream`
+- `custom-instruction`
+
+### 6. Compile the flow
+
+A flow is compiled into ordered governance instructions before publish.
+
+Compilation handles:
+
+- dependency ordering
+- cycle detection
+- risk scoring
+- warning generation
+- conversion into proposal instruction payloads
+
+Relevant files:
+
+- [server/src/features/flow/flow.service.ts](/Users/chigozzdev/Desktop/daometer/server/src/features/flow/flow.service.ts)
+- [server/src/features/flow/flow.compiler.ts](/Users/chigozzdev/Desktop/daometer/server/src/features/flow/flow.compiler.ts)
+- [server/src/features/flow/flow.routes.ts](/Users/chigozzdev/Desktop/daometer/server/src/features/flow/flow.routes.ts)
+
+### 7. Publish the flow as a proposal
+
+Publishing a flow does two things:
+
+1. creates an internal proposal record
+2. optionally prepares on-chain Realms-compatible proposal creation transactions
+
+The publish path also attaches `sourceFlowId` so proposal lifecycle automation stays bound to the flow that created it.
+
+Relevant files:
+
+- [server/src/features/flow/flow.service.ts](/Users/chigozzdev/Desktop/daometer/server/src/features/flow/flow.service.ts)
+- [server/src/features/proposal/proposal.service.ts](/Users/chigozzdev/Desktop/daometer/server/src/features/proposal/proposal.service.ts)
+
+### 8. Monitor and automate
+
+The worker runs on an interval and orchestrates automation around proposal lifecycle.
+
+It:
+
+1. releases expired locks
+2. syncs on-chain proposal state
+3. evaluates workflow rules
+4. synchronizes execution jobs
+5. claims and processes queued execution jobs
+
+Relevant file:
+
+- [server/src/worker/index.ts](/Users/chigozzdev/Desktop/daometer/server/src/worker/index.ts)
+
+## Realms / SPL Governance Integration
+
+Daometer is explicitly designed to work with Realms-compatible governance, not against it.
+
+Implemented integration points:
+
+- `@realms-today/spl-governance`
+- `@solana/web3.js`
+- wallet-signed transaction preparation
+- Realm creation
+- governance account creation
+- native treasury creation
+- governing token mint setup assistance
+- proposal publication with optional on-chain creation
+- governance power deposit / withdraw / delegate transaction preparation
+
+Backend dependency source:
+
+- [server/package.json](/Users/chigozzdev/Desktop/daometer/server/package.json)
+
+```json
+{
+  "@realms-today/spl-governance": "^0.3.33",
+  "@solana/web3.js": "^1.98.4"
+}
+```
+
+Client dependency source:
+
+- [client/package.json](/Users/chigozzdev/Desktop/daometer/client/package.json)
+
+```json
+{
+  "@solana/web3.js": "^1.98.4",
+  "reactflow": "^11.11.4"
+}
+```
+
+### What Daometer Uses Realms For
+
+At a practical level, Daometer uses Realms for:
+
+- DAO / Realm creation
+- governance rule configuration
+- treasury ownership and native treasury derivation
+- proposal lifecycle and voting
+- voting power mechanics (deposit, withdraw, delegate)
+
+### What Daometer Adds On Top
+
+Daometer adds the missing orchestration layer:
+
+- flow authoring instead of manual instruction composition
+- compile-time ordering and validation
+- reusable proposal templates
+- flow-scoped monitoring and automation
+- a simpler UX for preparing wallet-signed governance actions
+
+## Audius Integration
+
+### Current Status
+
+There is **no Audius-specific integration committed in this repository today**.
+
+That means:
+
+- there is no direct Audius API client
+- there is no Audius smart contract adapter
+- there is no dedicated Audius block type in the flow compiler
+
+This section is intentionally explicit so the README stays accurate.
+
+### Where Audius Fits
+
+The correct integration surface for Audius in the current architecture is the `custom-instruction` block plus workflow automation.
+
+Why:
+
+- Daometer already supports protocol-specific instruction payloads through `custom-instruction`
+- the compiler can include custom program/account metadata in proposal instructions
+- workflows can watch proposal state and trigger follow-up actions
+
+That means an Audius-specific extension would likely be implemented by:
+
+1. adding an **Audius block type** in the client builder
+2. mapping that block into a compiled instruction or worker action
+3. optionally adding an Audius integration client under [`server/src/shared/integrations`](/Users/chigozzdev/Desktop/daometer/server/src/shared/integrations)
+
+### What Exists Today That Enables It
+
+The current generic custom block shape:
+
+```ts
+return {
+  id: makeBlockId(),
+  type: 'custom-instruction',
+  label: 'Custom instruction',
+  programId: PLACEHOLDER_PUBKEY,
+  dataBase64: PLACEHOLDER_BASE64,
+  kind: 'custom',
+  accounts: [],
+  accountsCsv: '',
+};
+```
+
+That is the extension point Daometer would use for Audius-specific governance automation.
+
+### Shared Integrations Directory
+
+Current shared integrations:
+
+- [server/src/shared/integrations/resend.client.ts](/Users/chigozzdev/Desktop/daometer/server/src/shared/integrations/resend.client.ts)
+
+If Audius is added later, it belongs in this same integration layer.
+
+## Key Snippets
+
+### Wallet-signed DAO + governance preparation
+
+```ts
+daoRouter.post('/onchain-create', requireAuth, validateRequest(createDaoOnchainSchema), daoController.createOnchain);
+daoRouter.post('/:daoId/prepare-governance', requireAuth, validateRequest(prepareGovernanceCreateSchema), daoController.prepareGovernance);
+```
+
+### Flow compilation entrypoint
+
+```ts
+export const compileInlineFlow = (blocks: FlowBlock[], context: FlowCompileContext = {}) =>
+  compileFlowBlocks(blocks, context);
+```
+
+### Flow publish payload
+
+```ts
+const proposalInput: CreateProposalInput = {
+  daoId: flow.daoId.toString(),
+  sourceFlowId: flow.id,
+  instructions: compilation.instructions.map((instruction) => ({
+    index: instruction.index,
+    kind: instruction.kind,
+    label: instruction.label,
+    programId: instruction.programId,
+    accounts: instruction.accounts,
+    dataBase64: instruction.dataBase64,
+  })),
+};
+```
+
+### React Flow builder
+
+```tsx
+<ReactFlow
+  nodes={reactFlowNodes}
+  edges={reactFlowEdges}
+  nodeTypes={flowNodeTypes}
+  onNodesChange={handleNodesChange}
+  onEdgesChange={handleEdgesChange}
+  onConnect={handleConnect}
+  nodesDraggable
+  nodesConnectable
+  elementsSelectable
+>
+  <Background gap={20} size={2} color="#d9d9d9" />
+  <Controls position="bottom-right" />
+</ReactFlow>
+```
+
+### Worker tick loop
+
+```ts
+const releasedCount = await releaseExpiredJobLocks();
+const onchainStateSync = await syncOnchainProposalStates();
+const workflowEvaluation = await evaluateWorkflowRules(workerId);
+const syncResult = await synchronizeExecutionQueue();
+```
+
+### Execution job processing
+
+```ts
+const processResults: Array<Awaited<ReturnType<typeof processNextExecutionJob>>> = [];
+
+for (let index = 0; index < env.WORKER_MAX_JOBS_PER_TICK; index += 1) {
+  const result = await processNextExecutionJob(workerId);
+
+  if (!result.processed) {
+    break;
+  }
+
+  processResults.push(result);
+}
+```
 
 ## Project Structure
 
 ```txt
-src/
-  config/
-    env.config.ts
-    database.config.ts
-    logger.config.ts
-  shared/
-    errors/
-    middlewares/
-    utils/
-    types/
-  features/
-    auth/
-    dao/
-    flow/
-    proposal/
-    execution-job/
-    automation/
-    workflow/
-  routes/
-  worker/
+.
+├── client/
+│   ├── src/
+│   │   ├── app/
+│   │   ├── features/
+│   │   │   ├── auth/
+│   │   │   ├── dashboard/
+│   │   │   └── landing/
+│   │   └── shared/
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── vite.config.ts
+├── server/
+│   ├── src/
+│   │   ├── config/
+│   │   ├── features/
+│   │   │   ├── auth/
+│   │   │   ├── automation/
+│   │   │   ├── dao/
+│   │   │   ├── execution-job/
+│   │   │   ├── flow/
+│   │   │   ├── proposal/
+│   │   │   └── workflow/
+│   │   ├── routes/
+│   │   ├── scripts/
+│   │   ├── shared/
+│   │   │   ├── integrations/
+│   │   │   ├── middlewares/
+│   │   │   ├── solana/
+│   │   │   ├── types/
+│   │   │   └── utils/
+│   │   └── worker/
+│   ├── package.json
+│   └── tsconfig.json
+└── README.md
 ```
-
-Each feature uses:
-
-- `feature.model.ts`
-- `feature.schema.ts`
-- `feature.service.ts`
-- `feature.controller.ts`
-- `feature.routes.ts`
 
 ## Setup
 
-Run all backend commands from `/Users/chigozzdev/Desktop/daometer/server`.
+### Prerequisites
 
-1. Install deps:
+- Node.js 18+
+- npm
+- MongoDB
+- a Solana wallet (Phantom is the easiest path for client-side signing)
+
+### 1. Install client dependencies
+
+```bash
+cd client
+npm install
+```
+
+Client env:
+
+```bash
+cp .env.example .env
+```
+
+Default client env:
+
+```env
+VITE_API_BASE_URL=http://localhost:4000/api/v1
+```
+
+Source:
+
+- [client/.env.example](/Users/chigozzdev/Desktop/daometer/client/.env.example)
+
+### 2. Install server dependencies
 
 ```bash
 cd server
 npm install
 ```
 
-2. Create `.env` from `.env.example` and set values.
-
-3. Start API:
+Server env:
 
 ```bash
+cp .env.example .env
+```
+
+Important server env values:
+
+```env
+PORT=4000
+API_PREFIX=/api/v1
+MONGODB_URI=mongodb://127.0.0.1:27017/daometer
+SOLANA_RPC_URL=https://api.devnet.solana.com
+SOLANA_COMMITMENT=confirmed
+JWT_ACCESS_SECRET=replace-with-access-secret-minimum-32-chars
+JWT_REFRESH_SECRET=replace-with-refresh-secret-minimum-32-chars
+WORKER_EXECUTOR_SECRET_KEY=
+WORKER_SIMULATE_BEFORE_EXECUTE=true
+RESEND_API_KEY=
+RESEND_FROM_EMAIL=
+```
+
+Source:
+
+- [server/.env.example](/Users/chigozzdev/Desktop/daometer/server/.env.example)
+
+### 3. Run the backend API
+
+```bash
+cd server
 npm run dev
 ```
 
-4. Start worker:
+### 4. Run the worker
 
 ```bash
+cd server
 npm run worker:dev
 ```
 
+### 5. Run the client
+
+```bash
+cd client
+npm run dev
+```
+
+### 6. Open the app
+
+Once both services are running:
+
+- client: Vite dev server (usually `http://localhost:5173`)
+- API: `http://localhost:4000/api/v1`
+
+Recommended local flow:
+
+1. connect wallet
+2. create Realm / DAO
+3. create governance + treasury
+4. manage token / voting power if needed
+5. create a flow
+6. compile
+7. publish
+8. watch the worker process lifecycle updates
+
 ## Scripts
 
-- `npm run dev` - start API with watch mode
-- `npm run worker:dev` - start worker with watch mode
-- `npm run seed:dev` - seed demo user/dao/flow/proposal
-- `npm run type-check` - run TypeScript checks
-- `npm run build` - compile to `dist` with alias rewriting
-- `npm run start` - run compiled API
-- `npm run worker:start` - run compiled worker
+### Client
 
-## API Prefix
+- `npm run dev`
+- `npm run build`
+- `npm run preview`
+- `npm run type-check`
 
-Configured by `API_PREFIX` (default: `/api/v1`).
+### Server
 
-## Main Endpoints
+- `npm run dev`
+- `npm run build`
+- `npm run start`
+- `npm run worker:dev`
+- `npm run worker:start`
+- `npm run seed:dev`
+- `npm run type-check`
+- `npm run test`
+
+## API Surface
+
+Main backend prefixes are served under:
+
+- `API_PREFIX` (default: `/api/v1`)
+
+Core endpoint groups:
+
+- `/auth/*`
+- `/daos/*`
+- `/flows/*`
+- `/proposals/*`
+- `/execution-jobs/*`
+- `/automation/*`
+- `/workflows/*`
+
+Representative endpoints:
 
 - `POST /api/v1/auth/challenge`
 - `POST /api/v1/auth/verify`
-- `POST /api/v1/auth/refresh`
-- `GET /api/v1/auth/me`
-- `GET /api/v1/daos`
 - `POST /api/v1/daos`
 - `POST /api/v1/daos/onchain-create`
 - `POST /api/v1/daos/prepare-community-mint`
-- `GET /api/v1/daos/:daoId`
-- `PATCH /api/v1/daos/:daoId`
-- `GET /api/v1/flows`
+- `POST /api/v1/daos/:daoId/prepare-governance`
+- `POST /api/v1/daos/:daoId/prepare-mint-distribution`
+- `POST /api/v1/daos/:daoId/prepare-mint-authority`
+- `POST /api/v1/daos/:daoId/prepare-voting-deposit`
+- `POST /api/v1/daos/:daoId/prepare-voting-withdraw`
+- `POST /api/v1/daos/:daoId/prepare-voting-delegate`
 - `POST /api/v1/flows`
-- `GET /api/v1/flows/:flowId`
-- `PATCH /api/v1/flows/:flowId`
 - `POST /api/v1/flows/compile-inline`
 - `POST /api/v1/flows/:flowId/compile`
 - `POST /api/v1/flows/:flowId/publish`
-- `GET /api/v1/proposals/dao/:daoId`
-- `GET /api/v1/proposals/:proposalId`
-- `PATCH /api/v1/proposals/:proposalId/state`
-- `PATCH /api/v1/proposals/:proposalId/onchain-execution`
-- `POST /api/v1/proposals/:proposalId/onchain-sync`
-- `POST /api/v1/proposals/:proposalId/manual-approval`
-- `GET /api/v1/execution-jobs`
-- `POST /api/v1/execution-jobs/schedule/:proposalId`
-- `POST /api/v1/execution-jobs/:executionJobId/retry`
-- `POST /api/v1/automation/sync`
-- `POST /api/v1/automation/process-next`
-- `GET /api/v1/workflows`
-- `POST /api/v1/workflows`
-- `GET /api/v1/workflows/:workflowRuleId`
-- `PATCH /api/v1/workflows/:workflowRuleId`
-- `GET /api/v1/workflows/:workflowRuleId/events`
-- `POST /api/v1/workflows/evaluate`
 
-`execution-jobs/*` and `automation/*` are admin-only operations. Workflow CRUD operations require DAO management permissions.
+## Operational Notes
 
-## Worker Behavior
+- DAO and proposal creation can be non-custodial when using prepared wallet-signed transactions.
+- The worker handles polling, proposal state sync, workflow evaluation, and execution job processing.
+- The builder is flow-scoped; workflows evaluate proposals created from their source flow.
+- React Flow drives the canvas, so node movement, connection, and resizing are handled by a dedicated graph editor rather than a hand-rolled interaction layer.
+- This repository is strongest as a devnet-first governance automation stack; production use still requires security review, runtime hardening, and operational controls.
 
-On each tick, the worker:
+## Known Limitations
 
-1. Releases expired job locks
-2. Syncs proposal states from onchain (when configured)
-3. Evaluates workflow rules and executes matching actions
-4. Syncs eligible succeeded proposals into execution jobs
-5. Claims one job with distributed lock semantics
-6. Executes, reschedules, or fails the job based on DAO policy and proposal state
+- Audius-specific integration is not implemented yet.
+- Not every Solana / Realms instruction is exposed as a dedicated block; unsupported workflows fall back to `custom-instruction`.
+- The client bundle is currently large enough to trigger Vite chunk-size warnings.
+- Production-grade guardrails around irreversible governance actions still need deeper review.
 
-Onchain proposal execution (worker-driven) requires:
+## Why This Repo Exists
 
-- `WORKER_EXECUTOR_SECRET_KEY` configured
-- `proposal.onchainExecution.enabled=true`
-- governance metadata + transaction addresses attached via onchain config or sync endpoint
+Daometer exists to make Realms governance easier to author, safer to automate, and more reusable across DAO operations.
 
-Realm creation (`POST /api/v1/daos/onchain-create`) is non-custodial and uses the connected user wallet as payer/signer.
-
-Workflow email actions require:
-
-- `RESEND_API_KEY`
-- `RESEND_FROM_EMAIL`
-
-Drag-and-drop is represented server-side as persisted `blocks` in the Flow feature, compiled into proposal instructions before publish.
-
-## End-to-End Flow
-
-1. Create a `flow` with drag-and-drop blocks.
-2. Compile and publish flow to an internal proposal record.
-   - Publish can optionally include `onchainCreate` to create the Realms proposal immediately.
-3. Worker monitors proposal state and executes onchain transactions after success + hold-up.
-
-## Workflow Rules (If/Else + Timing + Actions)
-
-Workflow rules let you automate proposal handling with:
-
-- Triggers:
-  - `proposal-state-changed` (for selected states)
-  - `voting-ends-in` (offset minutes)
-  - `hold-up-expires-in` (offset minutes)
-- Conditions:
-  - `mode: "all" | "any"`
-  - field/operator checks (state, riskScore, voteScope, onchainEnabled, hoursToVotingEnd, etc.)
-- Branch actions:
-  - `actions.onTrue[]`
-  - `actions.onFalse[]`
-
-Available actions:
-
-- `send-email` (Resend)
-- `enqueue-execution` (queue job)
-- `execute-now` (prioritize immediate execution)
-- `set-manual-approval` (require/release manual gate)
-
-Manual approval gate behavior:
-
-- If manual approval is required and not approved, execution jobs are rescheduled.
-- If manual approval is explicitly rejected, the proposal is marked `execution-error` and execution job is failed.
-
-Example rule (5-hour reminder before vote end):
-
-```json
-{
-  "daoId": "65f0f7f71f8f17dc18f2a001",
-  "name": "Voting ends in 5h",
-  "trigger": {
-    "type": "voting-ends-in",
-    "states": [],
-    "offsetMinutes": 300
-  },
-  "conditions": {
-    "mode": "all",
-    "rules": [
-      { "field": "state", "operator": "eq", "value": "voting" }
-    ]
-  },
-  "actions": {
-    "onTrue": [
-      {
-        "type": "send-email",
-        "enabled": true,
-        "config": {
-          "to": ["ops@example.com"],
-          "subject": "Proposal ends soon: {{proposal.title}}",
-          "body": "State: {{proposal.state}}\nVoting ends at: {{proposal.votingEndsAt}}"
-        }
-      }
-    ],
-    "onFalse": []
-  }
-}
-```
-
-Current automatic onchain-creation support:
-
-- `transfer-sol` blocks
-- `transfer-spl` blocks
-- `custom-instruction` blocks (requires explicit `accountMetas`)
-
-If unsupported instruction kinds are present, automatic onchain creation/execution configuration is rejected.
-Internal proposal records use their own `proposalAddress` reference; onchain proposal addresses are tracked separately under `onchainExecution.proposalAddress`.
-
-DAO on-chain creation support:
-
-- `POST /api/v1/daos/onchain-create` prepares an unsigned Realm-creation transaction for wallet signing.
-- The connected user wallet is the fee payer/signer; backend only prepares metadata and stores DAO records when explicitly posted to `POST /api/v1/daos`.
-- `POST /api/v1/daos/prepare-community-mint` prepares an unsigned SPL mint-creation transaction (wallet-signed) and returns the generated mint address for Community Mint usage.
-
-## Notes
-
-- No new smart contracts are required for this backend.
-- Automation policy is enforced at the service layer using DAO + proposal config.
-- This service is an orchestration layer around existing Realms/SPL governance; it does not implement full onchain governance UX features (wallet voting, deposits/delegation, plugin lifecycle, Sowellian market lifecycle).
+Instead of manually rebuilding proposal logic every time, teams can create structured flows, publish those flows into proposals, and let the worker coordinate the lifecycle after publication.
