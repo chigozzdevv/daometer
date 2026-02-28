@@ -1,20 +1,23 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  compileInlineFlow,
+  compileFlowById,
+  createFlowBlock,
+  deleteFlowBlock,
   getDaoById,
   getDaoGovernances,
+  getFlowBlocks,
   getFlowById,
   publishFlow,
+  updateFlowBlock,
   updateProposalOnchainExecution,
   type DaoGovernanceItem,
   type DaoItem,
+  type FlowBlockItem,
   type FlowBlockInput,
   type FlowCompilationResult,
-  type FlowGraph,
   type FlowGraphEdge,
   type FlowGraphNode,
   type PublishFlowResult,
-  updateFlow,
 } from '@/features/dashboard/api/api';
 import { formatDateTime } from '@/features/dashboard/lib/format';
 import { getSolanaProvider, sendPreparedTransaction } from '@/shared/solana/wallet';
@@ -128,15 +131,6 @@ const getDefaultNodePosition = (index: number): { x: number; y: number } => ({
   y: 40 + Math.floor(index / 3) * 260,
 });
 
-const createDefaultBlock = (): FlowBlockInput => ({
-  id: makeBlockId(),
-  type: 'transfer-sol',
-  label: 'Treasury transfer',
-  fromGovernance: PLACEHOLDER_PUBKEY,
-  toWallet: PLACEHOLDER_PUBKEY,
-  lamports: 1_000_000,
-});
-
 const defaultBlockForType = (type: SupportedBlockType): FlowBlockInput => {
   if (type === 'transfer-sol') {
     return {
@@ -228,71 +222,74 @@ const defaultBlockForType = (type: SupportedBlockType): FlowBlockInput => {
   };
 };
 
-const deriveGraphFromBlocks = (blocks: FlowBlockInput[]): FlowGraph => {
-  const nodes: FlowGraphNode[] = blocks.map((block, index) => {
-    const blockId = getBlockId(block) || `legacy-block-${index}`;
-    const { x, y } = getDefaultNodePosition(index);
-    return { id: blockId, x, y };
-  });
+const inflateBlockForEditor = (block: FlowBlockInput): FlowBlockInput => {
+  if (getString(block.type) !== 'custom-instruction') {
+    return block;
+  }
 
-  return { nodes, edges: [] };
+  const accounts = Array.isArray(block.accounts)
+    ? block.accounts
+        .map((entry) => {
+          if (!entry || typeof entry !== 'object') {
+            return '';
+          }
+
+          return getString((entry as { pubkey?: string }).pubkey);
+        })
+        .filter(Boolean)
+    : [];
+
+  return {
+    ...block,
+    accountsCsv: accounts.join(', '),
+  };
 };
 
-const normalizeGraphForBlocks = (
-  blocks: FlowBlockInput[],
-  graphNodes: FlowGraphNode[],
-  graphEdges: FlowGraphEdge[],
-): FlowGraph => {
-  const blockIds = blocks.map((block) => getBlockId(block)).filter(Boolean);
-  const blockIdSet = new Set(blockIds);
-  const uniqueNodes = new Map<string, FlowGraphNode>();
-
-  graphNodes.forEach((node) => {
-    if (!blockIdSet.has(node.id) || uniqueNodes.has(node.id)) {
-      return;
-    }
-
-    uniqueNodes.set(node.id, {
-      id: node.id,
-      x: Number.isFinite(node.x) ? Math.max(0, node.x) : 0,
-      y: Number.isFinite(node.y) ? Math.max(0, node.y) : 0,
-    });
-  });
-
-  const nodes: FlowGraphNode[] = blockIds.map((id, index) => {
-    const existing = uniqueNodes.get(id);
-
-    if (existing) {
-      return existing;
-    }
-
-    const { x, y } = getDefaultNodePosition(index);
-    return { id, x, y };
-  });
-
+const deriveDraftFromPersistedBlocks = (
+  items: FlowBlockItem[],
+): {
+  blocks: FlowBlockInput[];
+  graphNodes: FlowGraphNode[];
+  graphEdges: FlowGraphEdge[];
+  nodeWidths: Record<string, number>;
+} => {
+  const sorted = [...items].sort((left, right) => left.orderIndex - right.orderIndex);
+  const blocks = sorted.map((item) => inflateBlockForEditor(item.config));
+  const graphNodes = sorted.map((item) => ({
+    id: item.blockId,
+    x: item.position.x,
+    y: item.position.y,
+  }));
   const edgeKeys = new Set<string>();
-  const edges: FlowGraphEdge[] = [];
+  const graphEdges = sorted.flatMap((item, itemIndex) =>
+    item.dependencies.flatMap((dependency, dependencyIndex) => {
+      const edgeKey = `${dependency.sourceBlockId}->${item.blockId}`;
 
-  graphEdges.forEach((edge, index) => {
-    if (!blockIdSet.has(edge.source) || !blockIdSet.has(edge.target) || edge.source === edge.target) {
-      return;
-    }
+      if (edgeKeys.has(edgeKey)) {
+        return [];
+      }
 
-    const edgeKey = `${edge.source}->${edge.target}`;
+      edgeKeys.add(edgeKey);
 
-    if (edgeKeys.has(edgeKey)) {
-      return;
-    }
+      return [
+        {
+          id: makeEdgeId(dependency.sourceBlockId, item.blockId, itemIndex + dependencyIndex),
+          source: dependency.sourceBlockId,
+          target: item.blockId,
+        },
+      ];
+    }),
+  );
+  const nodeWidths = Object.fromEntries(
+    sorted.map((item) => [item.blockId, clamp(item.uiWidth, minNodeWidth, maxNodeWidth)]),
+  );
 
-    edgeKeys.add(edgeKey);
-    edges.push({
-      id: edge.id || makeEdgeId(edge.source, edge.target, index),
-      source: edge.source,
-      target: edge.target,
-    });
-  });
-
-  return { nodes, edges };
+  return {
+    blocks,
+    graphNodes,
+    graphEdges,
+    nodeWidths,
+  };
 };
 
 const topologicalSortBlocks = (blocks: FlowBlockInput[], edges: FlowGraphEdge[]): FlowBlockInput[] => {
@@ -420,8 +417,6 @@ type FlowEditorProps = {
 type EditorStep = 'builder' | 'compile' | 'publish';
 
 export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorProps): JSX.Element => {
-  const autosaveTimerRef = useRef<number | null>(null);
-
   const [activeStep, setActiveStep] = useState<EditorStep>('builder');
   const [flowName, setFlowName] = useState('');
   const [flowDescription, setFlowDescription] = useState('');
@@ -430,8 +425,6 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
   const [governanceOptions, setGovernanceOptions] = useState<DaoGovernanceItem[]>([]);
   const [isLoadingDaoContext, setIsLoadingDaoContext] = useState(false);
   const [isLoadingFlow, setIsLoadingFlow] = useState(true);
-  const [isHydrating, setIsHydrating] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
   const [isAutoSaving, setIsAutoSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
 
@@ -446,6 +439,8 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
   const [nodeWidths, setNodeWidths] = useState<Record<string, number>>({});
   const [nodeMeta, setNodeMeta] = useState<Record<string, { dragging?: boolean; resizing?: boolean }>>({});
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+
+  const [configForm, setConfigForm] = useState<Record<string, unknown>>({});
 
   const [compileContextJson, setCompileContextJson] = useState('{}');
   const [compileResult, setCompileResult] = useState<FlowCompilationResult | null>(null);
@@ -463,7 +458,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
     [governanceOptions, publishGovernanceAddress],
   );
   const getNodeWidth = (nodeId: string): number => nodeWidths[nodeId] ?? defaultNodeWidth;
-  const saveStateLabel = isAutoSaving ? 'Auto-saving...' : isDirty ? 'Unsaved changes' : 'Saved';
+  const saveStateLabel = isAutoSaving ? 'Saving...' : 'Saved';
 
   const orderingPreview = useMemo(() => {
     try {
@@ -484,16 +479,64 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
     [blocks, selectedBlockId],
   );
 
+  useEffect(() => {
+    if (selectedBlock) {
+      setConfigForm({ ...selectedBlock });
+    } else {
+      setConfigForm({});
+    }
+  }, [selectedBlock]);
+
   const handleSelectBlock = useCallback((blockId: string): void => {
     setSelectedBlockId(blockId);
   }, []);
 
-  const markDirty = (): void => {
-    if (!isHydrating) {
-      setIsDirty(true);
-      setCompileResult(null);
-    }
-  };
+  const hydrateFlowBlocks = useCallback(async (): Promise<void> => {
+    const persistedBlocks = await getFlowBlocks(flowId, accessToken);
+    const draft = deriveDraftFromPersistedBlocks(persistedBlocks);
+
+    setBlocks(draft.blocks);
+    setGraphNodes(draft.graphNodes);
+    setGraphEdges(draft.graphEdges);
+    setNodeWidths(draft.nodeWidths);
+    setNodeMeta({});
+  }, [accessToken, flowId]);
+
+  const runPersistedMutation = useCallback(
+    async (
+      operation: () => Promise<void>,
+      options: {
+        refreshDraft?: boolean;
+        invalidateCompilation?: boolean;
+      } = {},
+    ): Promise<void> => {
+      setIsAutoSaving(true);
+
+      try {
+        await operation();
+
+        if (options.refreshDraft) {
+          await hydrateFlowBlocks();
+        }
+
+        if (options.invalidateCompilation !== false) {
+          setCompileResult(null);
+        }
+
+        setLastSavedAt(new Date().toISOString());
+      } catch (mutationError) {
+        setError(mutationError instanceof Error ? mutationError.message : 'Unable to save builder changes');
+        try {
+          await hydrateFlowBlocks();
+        } catch {
+          // Keep the original mutation error visible.
+        }
+      } finally {
+        setIsAutoSaving(false);
+      }
+    },
+    [hydrateFlowBlocks],
+  );
 
   const hydrateFlow = async (): Promise<void> => {
     setIsLoadingFlow(true);
@@ -501,37 +544,19 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
 
     try {
       const flow = await getFlowById(flowId);
-      setIsHydrating(true);
-
-      const loadedBlocks =
-        Array.isArray(flow.blocks) && flow.blocks.length > 0
-          ? flow.blocks.map((block) => ensureStableBlockId(block))
-          : [createDefaultBlock()];
-      const fallbackGraph = deriveGraphFromBlocks(loadedBlocks);
-      const normalizedGraph = normalizeGraphForBlocks(
-        loadedBlocks,
-        flow.graph?.nodes ?? fallbackGraph.nodes,
-        flow.graph?.edges ?? fallbackGraph.edges,
-      );
+      const persistedBlocks = await getFlowBlocks(flowId, accessToken);
+      const draft = deriveDraftFromPersistedBlocks(persistedBlocks);
 
       setFlowName(flow.name);
       setFlowDescription(flow.description ?? '');
       setFlowDaoId(flow.daoId);
-      setBlocks(loadedBlocks);
-      setGraphNodes(normalizedGraph.nodes);
-      setGraphEdges(normalizedGraph.edges);
-      setNodeWidths(
-        Object.fromEntries(
-          normalizedGraph.nodes.map((node) => {
-            const matchingBlock = loadedBlocks.find((block) => getBlockId(block) === node.id);
-            return [node.id, clamp(getNumber(matchingBlock?.uiWidth, defaultNodeWidth), minNodeWidth, maxNodeWidth)];
-          }),
-        ),
-      );
+      setBlocks(draft.blocks);
+      setGraphNodes(draft.graphNodes);
+      setGraphEdges(draft.graphEdges);
+      setNodeWidths(draft.nodeWidths);
       setNodeMeta({});
       setSelectedBlockId(null);
       setActiveStep('builder');
-      setIsDirty(false);
       setCompileResult(null);
       setLastPublishResult(null);
       setSuccess(null);
@@ -539,7 +564,6 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load flow');
     } finally {
-      setIsHydrating(false);
       setIsLoadingFlow(false);
     }
   };
@@ -614,21 +638,6 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
       isMounted = false;
     };
   }, [flowDaoId]);
-
-  useEffect(() => {
-    if (!daoContext) {
-      return;
-    }
-
-    setBlocks((current) => current.map((block) => applyDaoDefaultsToBlock(block)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    daoContext?.id,
-    daoContext?.communityMint,
-    selectedGovernance?.address,
-    selectedGovernance?.nativeTreasuryAddress,
-    publishGoverningTokenMint,
-  ]);
 
   const normalizeBlocksForApi = (items: FlowBlockInput[]): FlowBlockInput[] =>
     items.map((block) => {
@@ -710,86 +719,15 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
       };
     });
 
-  const buildDraftPayload = (requireAcyclic: boolean): { blocks: FlowBlockInput[]; graph: FlowGraph } => {
-    if (!Array.isArray(blocks) || blocks.length === 0) {
-      throw new Error('Add at least one block to continue.');
-    }
-
-    const normalizedGraph = normalizeGraphForBlocks(blocks, graphNodes, graphEdges);
-    const baseBlocks = requireAcyclic ? topologicalSortBlocks(blocks, normalizedGraph.edges) : blocks;
-    const normalizedBlocks = normalizeBlocksForApi(baseBlocks).map((block) => ({
-      ...block,
-      uiWidth: getNodeWidth(getBlockId(block)),
-    }));
-
-    return {
-      blocks: normalizedBlocks,
-      graph: normalizedGraph,
-    };
-  };
-
-  const persistDraft = async (requireAcyclic: boolean): Promise<{ blocks: FlowBlockInput[]; graph: FlowGraph } | null> => {
-    try {
-      const payload = buildDraftPayload(requireAcyclic);
-      setIsAutoSaving(true);
-
-      await updateFlow(
-        flowId,
-        {
-          blocks: payload.blocks,
-          graph: payload.graph,
-        },
-        accessToken,
-      );
-
-      setIsDirty(false);
-      setLastSavedAt(new Date().toISOString());
-      return payload;
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Auto-save failed');
-      return null;
-    } finally {
-      setIsAutoSaving(false);
-    }
-  };
-
-  useEffect(() => {
-    if (isHydrating || !isDirty || isPublishing || isCompiling) {
-      return;
-    }
-
-    if (autosaveTimerRef.current) {
-      window.clearTimeout(autosaveTimerRef.current);
-    }
-
-    autosaveTimerRef.current = window.setTimeout(() => {
-      void persistDraft(false);
-    }, 1200);
-
-    return () => {
-      if (autosaveTimerRef.current) {
-        window.clearTimeout(autosaveTimerRef.current);
-        autosaveTimerRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDirty, blocks, graphNodes, graphEdges, isHydrating, isPublishing, isCompiling]);
-
   const handleCompile = async (): Promise<void> => {
     setError(null);
     setSuccess(null);
     setIsCompiling(true);
 
     try {
-      const payload = await persistDraft(true);
-
-      if (!payload) {
-        return;
-      }
-
       const contextRaw = compileContextJson.trim();
       const context = contextRaw ? parseJson<Record<string, unknown>>(contextRaw, 'Compile context') : {};
-      const result = await compileInlineFlow(payload.blocks, context, accessToken);
+      const result = await compileFlowById(flowId, context, accessToken);
 
       setCompileResult(result);
       setActiveStep('compile');
@@ -829,12 +767,6 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
     setIsPublishing(true);
 
     try {
-      const payload = await persistDraft(true);
-
-      if (!payload) {
-        return;
-      }
-
       const result = await publishFlow(
         flowId,
         publishOnchainNow
@@ -978,101 +910,188 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
   };
 
   const addBlock = (type: SupportedBlockType): void => {
-    const nextBlock = applyDaoDefaultsToBlock(defaultBlockForType(type));
+    const nextBlock = normalizeBlocksForApi([applyDaoDefaultsToBlock(defaultBlockForType(type))])[0];
     const nextBlockId = getBlockId(nextBlock);
+    const position = getDefaultNodePosition(graphNodes.length);
 
-    setBlocks((current) => [...current, nextBlock]);
-    setGraphNodes((current) => {
-      const position = getDefaultNodePosition(current.length);
-      return [...current, { id: nextBlockId, x: position.x, y: position.y }];
-    });
-    setNodeWidths((current) => ({
-      ...current,
-      [nextBlockId]: defaultNodeWidth,
-    }));
     setSelectedBlockId(nextBlockId);
+    setConfigForm({ ...nextBlock });
 
-    markDirty();
+    void runPersistedMutation(
+      async () => {
+        await createFlowBlock(
+          flowId,
+          {
+            config: nextBlock,
+            position,
+            uiWidth: defaultNodeWidth,
+            orderIndex: blocks.length,
+          },
+          accessToken,
+        );
+      },
+      {
+        refreshDraft: true,
+      },
+    );
   };
 
   const removeBlock = (blockId: string): void => {
-    setBlocks((current) => current.filter((block) => getBlockId(block) !== blockId));
-    setGraphNodes((current) => current.filter((node) => node.id !== blockId));
-    setGraphEdges((current) => current.filter((edge) => edge.source !== blockId && edge.target !== blockId));
-    setNodeWidths((current) => {
-      const next = { ...current };
-      delete next[blockId];
-      return next;
-    });
-    setNodeMeta((current) => {
-      const next = { ...current };
-      delete next[blockId];
-      return next;
-    });
     setSelectedBlockId((current) => (current === blockId ? null : current));
-    markDirty();
+
+    void runPersistedMutation(
+      async () => {
+        await deleteFlowBlock(flowId, blockId, accessToken);
+      },
+      {
+        refreshDraft: true,
+      },
+    );
   };
+
+  const buildDependenciesForTarget = useCallback(
+    (targetId: string, edges: FlowGraphEdge[]): Array<{ sourceBlockId: string }> => {
+      const seen = new Set<string>();
+
+      return edges.flatMap((edge) => {
+        if (edge.target !== targetId || seen.has(edge.source)) {
+          return [];
+        }
+
+        seen.add(edge.source);
+        return [{ sourceBlockId: edge.source }];
+      });
+    },
+    [],
+  );
+
+  const persistDependencies = useCallback(
+    (targetIds: string[], edges: FlowGraphEdge[]): void => {
+      if (targetIds.length === 0) {
+        return;
+      }
+
+      void runPersistedMutation(
+        async () => {
+          await Promise.all(
+            [...new Set(targetIds)].map((targetId) =>
+              updateFlowBlock(
+                flowId,
+                targetId,
+                {
+                  dependencies: buildDependenciesForTarget(targetId, edges),
+                },
+                accessToken,
+              ),
+            ),
+          );
+        },
+        {
+          refreshDraft: true,
+        },
+      );
+    },
+    [accessToken, buildDependenciesForTarget, flowId, runPersistedMutation],
+  );
 
   const removeEdge = (edgeId: string): void => {
-    setGraphEdges((current) => current.filter((edge) => edge.id !== edgeId));
-    markDirty();
+    const removedEdge = graphEdges.find((edge) => edge.id === edgeId);
+
+    if (!removedEdge) {
+      return;
+    }
+
+    const nextEdges = graphEdges.filter((edge) => edge.id !== edgeId);
+    setGraphEdges(nextEdges);
+    persistDependencies([removedEdge.target], nextEdges);
   };
+  const changeBlockType = useCallback((blockId: string, nextType: SupportedBlockType): void => {
+    const currentBlock = blocks.find((block) => getBlockId(block) === blockId);
 
-  const changeBlockType = (blockId: string, nextType: SupportedBlockType): void => {
-    setBlocks((current) =>
-      current.map((block) => {
-        if (getBlockId(block) !== blockId) {
-          return block;
-        }
+    if (!currentBlock) {
+      return;
+    }
 
-        const next = applyDaoDefaultsToBlock(defaultBlockForType(nextType));
-        return {
-          ...next,
-          id: blockId,
-          label: getString(block.label, getString(next.label)),
-          uiWidth: getNumber(block.uiWidth, getNodeWidth(blockId)),
-        };
-      }),
+    const next = applyDaoDefaultsToBlock(defaultBlockForType(nextType));
+    const nextConfig = normalizeBlocksForApi([
+      {
+        ...next,
+        id: blockId,
+        label: getString(currentBlock.label, getString(next.label)),
+      },
+    ])[0];
+
+    setConfigForm({ ...inflateBlockForEditor(nextConfig) });
+
+    void runPersistedMutation(
+      async () => {
+        await updateFlowBlock(
+          flowId,
+          blockId,
+          {
+            config: nextConfig,
+          },
+          accessToken,
+        );
+      },
+      {
+        refreshDraft: true,
+      },
     );
+  }, [accessToken, blocks, flowId, runPersistedMutation]);
 
-    markDirty();
-  };
+  const setConfigField = useCallback((field: string, value: unknown): void => {
+    setConfigForm((prev) => ({ ...prev, [field]: value }));
+  }, []);
 
-  const setBlockField = useCallback((blockId: string, field: string, value: unknown): void => {
-    setBlocks((current) =>
-      current.map((block) => {
-        if (getBlockId(block) !== blockId) {
-          return block;
-        }
+  const saveConfigToBlock = useCallback((): void => {
+    if (!selectedBlockId) {
+      return;
+    }
 
-        return {
-          ...block,
-          [field]: value,
-        };
-      }),
+    const nextConfig = normalizeBlocksForApi([
+      {
+        ...(configForm as FlowBlockInput),
+        id: selectedBlockId,
+      },
+    ])[0];
+
+    setConfigForm({ ...inflateBlockForEditor(nextConfig) });
+
+    void runPersistedMutation(
+      async () => {
+        await updateFlowBlock(
+          flowId,
+          selectedBlockId,
+          {
+            config: nextConfig,
+          },
+          accessToken,
+        );
+      },
+      {
+        refreshDraft: true,
+      },
     );
+  }, [accessToken, configForm, flowId, runPersistedMutation, selectedBlockId]);
 
-    markDirty();
-  }, [markDirty]);
-
-  const renderNodeFields = useCallback((block: FlowBlockInput): JSX.Element => {
-    const blockId = getBlockId(block);
-    const type = getString(block.type) as SupportedBlockType;
+  const renderConfigFields = useCallback((): JSX.Element | null => {
+    const type = getString(configForm.type) as SupportedBlockType;
 
     if (type === 'transfer-sol') {
       return (
         <div className="form-grid two-col">
           <label className="input-label">
             From governance
-            <input className="text-input" value={getString(block.fromGovernance)} onChange={(event) => setBlockField(blockId, 'fromGovernance', event.target.value)} />
+            <input className="text-input" value={getString(configForm.fromGovernance)} onChange={(event) => setConfigField('fromGovernance', event.target.value)} />
           </label>
           <label className="input-label">
             To wallet
-            <input className="text-input" value={getString(block.toWallet)} onChange={(event) => setBlockField(blockId, 'toWallet', event.target.value)} />
+            <input className="text-input" value={getString(configForm.toWallet)} onChange={(event) => setConfigField('toWallet', event.target.value)} />
           </label>
           <label className="input-label">
             Lamports
-            <input className="text-input" type="number" min={0} value={getNumber(block.lamports, 0)} onChange={(event) => setBlockField(blockId, 'lamports', Number(event.target.value))} />
+            <input className="text-input" type="number" min={0} value={getNumber(configForm.lamports, 0)} onChange={(event) => setConfigField('lamports', Number(event.target.value))} />
           </label>
         </div>
       );
@@ -1083,23 +1102,23 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
         <div className="form-grid two-col">
           <label className="input-label">
             Token mint
-            <input className="text-input" value={getString(block.tokenMint)} onChange={(event) => setBlockField(blockId, 'tokenMint', event.target.value)} />
+            <input className="text-input" value={getString(configForm.tokenMint)} onChange={(event) => setConfigField('tokenMint', event.target.value)} />
           </label>
           <label className="input-label">
             Amount
-            <input className="text-input" value={getString(block.amount, '0')} onChange={(event) => setBlockField(blockId, 'amount', event.target.value)} />
+            <input className="text-input" value={getString(configForm.amount, '0')} onChange={(event) => setConfigField('amount', event.target.value)} />
           </label>
           <label className="input-label">
             From token account
-            <input className="text-input" value={getString(block.fromTokenAccount)} onChange={(event) => setBlockField(blockId, 'fromTokenAccount', event.target.value)} />
+            <input className="text-input" value={getString(configForm.fromTokenAccount)} onChange={(event) => setConfigField('fromTokenAccount', event.target.value)} />
           </label>
           <label className="input-label">
             To token account
-            <input className="text-input" value={getString(block.toTokenAccount)} onChange={(event) => setBlockField(blockId, 'toTokenAccount', event.target.value)} />
+            <input className="text-input" value={getString(configForm.toTokenAccount)} onChange={(event) => setConfigField('toTokenAccount', event.target.value)} />
           </label>
           <label className="input-label">
             Decimals
-            <input className="text-input" type="number" min={0} max={18} value={getNumber(block.decimals, 6)} onChange={(event) => setBlockField(blockId, 'decimals', Number(event.target.value))} />
+            <input className="text-input" type="number" min={0} max={18} value={getNumber(configForm.decimals, 6)} onChange={(event) => setConfigField('decimals', Number(event.target.value))} />
           </label>
         </div>
       );
@@ -1110,19 +1129,19 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
         <div className="form-grid two-col">
           <label className="input-label">
             Governance address
-            <input className="text-input" value={getString(block.governanceAddress)} onChange={(event) => setBlockField(blockId, 'governanceAddress', event.target.value)} />
+            <input className="text-input" value={getString(configForm.governanceAddress)} onChange={(event) => setConfigField('governanceAddress', event.target.value)} />
           </label>
           <label className="input-label">
             Yes threshold (%)
-            <input className="text-input" type="number" min={0} max={100} value={getNumber(block.yesVoteThresholdPercent, 60)} onChange={(event) => setBlockField(blockId, 'yesVoteThresholdPercent', Number(event.target.value))} />
+            <input className="text-input" type="number" min={0} max={100} value={getNumber(configForm.yesVoteThresholdPercent, 60)} onChange={(event) => setConfigField('yesVoteThresholdPercent', Number(event.target.value))} />
           </label>
           <label className="input-label">
             Base voting time (sec)
-            <input className="text-input" type="number" min={0} value={getNumber(block.baseVotingTimeSeconds, 259200)} onChange={(event) => setBlockField(blockId, 'baseVotingTimeSeconds', Number(event.target.value))} />
+            <input className="text-input" type="number" min={0} value={getNumber(configForm.baseVotingTimeSeconds, 259200)} onChange={(event) => setConfigField('baseVotingTimeSeconds', Number(event.target.value))} />
           </label>
           <label className="input-label">
             Hold-up time (sec)
-            <input className="text-input" type="number" min={0} value={getNumber(block.minInstructionHoldUpTimeSeconds, 0)} onChange={(event) => setBlockField(blockId, 'minInstructionHoldUpTimeSeconds', Number(event.target.value))} />
+            <input className="text-input" type="number" min={0} value={getNumber(configForm.minInstructionHoldUpTimeSeconds, 0)} onChange={(event) => setConfigField('minInstructionHoldUpTimeSeconds', Number(event.target.value))} />
           </label>
         </div>
       );
@@ -1133,15 +1152,15 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
         <div className="form-grid two-col">
           <label className="input-label">
             Program ID
-            <input className="text-input" value={getString(block.programId)} onChange={(event) => setBlockField(blockId, 'programId', event.target.value)} />
+            <input className="text-input" value={getString(configForm.programId)} onChange={(event) => setConfigField('programId', event.target.value)} />
           </label>
           <label className="input-label">
             Buffer address
-            <input className="text-input" value={getString(block.bufferAddress)} onChange={(event) => setBlockField(blockId, 'bufferAddress', event.target.value)} />
+            <input className="text-input" value={getString(configForm.bufferAddress)} onChange={(event) => setConfigField('bufferAddress', event.target.value)} />
           </label>
           <label className="input-label">
             Spill address
-            <input className="text-input" value={getString(block.spillAddress)} onChange={(event) => setBlockField(blockId, 'spillAddress', event.target.value)} />
+            <input className="text-input" value={getString(configForm.spillAddress)} onChange={(event) => setConfigField('spillAddress', event.target.value)} />
           </label>
         </div>
       );
@@ -1152,15 +1171,15 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
         <div className="form-grid two-col">
           <label className="input-label">
             Payer (signer)
-            <input className="text-input" value={getString(block.payer)} onChange={(event) => setBlockField(blockId, 'payer', event.target.value)} />
+            <input className="text-input" value={getString(configForm.payer)} onChange={(event) => setConfigField('payer', event.target.value)} />
           </label>
           <label className="input-label">
             Owner
-            <input className="text-input" value={getString(block.owner)} onChange={(event) => setBlockField(blockId, 'owner', event.target.value)} />
+            <input className="text-input" value={getString(configForm.owner)} onChange={(event) => setConfigField('owner', event.target.value)} />
           </label>
           <label className="input-label">
             Token mint
-            <input className="text-input" value={getString(block.mint)} onChange={(event) => setBlockField(blockId, 'mint', event.target.value)} />
+            <input className="text-input" value={getString(configForm.mint)} onChange={(event) => setConfigField('mint', event.target.value)} />
           </label>
         </div>
       );
@@ -1171,65 +1190,69 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
         <div className="form-grid two-col">
           <label className="input-label">
             Stream program ID
-            <input className="text-input" value={getString(block.streamProgramId)} onChange={(event) => setBlockField(blockId, 'streamProgramId', event.target.value)} />
+            <input className="text-input" value={getString(configForm.streamProgramId)} onChange={(event) => setConfigField('streamProgramId', event.target.value)} />
           </label>
           <label className="input-label">
             Treasury token account
-            <input className="text-input" value={getString(block.treasuryTokenAccount)} onChange={(event) => setBlockField(blockId, 'treasuryTokenAccount', event.target.value)} />
+            <input className="text-input" value={getString(configForm.treasuryTokenAccount)} onChange={(event) => setConfigField('treasuryTokenAccount', event.target.value)} />
           </label>
           <label className="input-label">
             Recipient wallet
-            <input className="text-input" value={getString(block.recipientWallet)} onChange={(event) => setBlockField(blockId, 'recipientWallet', event.target.value)} />
+            <input className="text-input" value={getString(configForm.recipientWallet)} onChange={(event) => setConfigField('recipientWallet', event.target.value)} />
           </label>
           <label className="input-label">
             Token mint
-            <input className="text-input" value={getString(block.tokenMint)} onChange={(event) => setBlockField(blockId, 'tokenMint', event.target.value)} />
+            <input className="text-input" value={getString(configForm.tokenMint)} onChange={(event) => setConfigField('tokenMint', event.target.value)} />
           </label>
           <label className="input-label">
             Total amount
-            <input className="text-input" value={getString(block.totalAmount, '0')} onChange={(event) => setBlockField(blockId, 'totalAmount', event.target.value)} />
+            <input className="text-input" value={getString(configForm.totalAmount, '0')} onChange={(event) => setConfigField('totalAmount', event.target.value)} />
           </label>
           <label className="input-label">
             Start at (ISO datetime)
-            <input className="text-input" value={getString(block.startAt)} onChange={(event) => setBlockField(blockId, 'startAt', event.target.value)} />
+            <input className="text-input" value={getString(configForm.startAt)} onChange={(event) => setConfigField('startAt', event.target.value)} />
           </label>
           <label className="input-label">
             End at (ISO datetime)
-            <input className="text-input" value={getString(block.endAt)} onChange={(event) => setBlockField(blockId, 'endAt', event.target.value)} />
+            <input className="text-input" value={getString(configForm.endAt)} onChange={(event) => setConfigField('endAt', event.target.value)} />
           </label>
           <label className="checkbox-field">
-            <input type="checkbox" checked={getBoolean(block.canCancel, true)} onChange={(event) => setBlockField(blockId, 'canCancel', event.target.checked)} />
+            <input type="checkbox" checked={getBoolean(configForm.canCancel, true)} onChange={(event) => setConfigField('canCancel', event.target.checked)} />
             Can cancel stream
           </label>
         </div>
       );
     }
 
-    return (
-      <div className="form-grid two-col">
-        <label className="input-label">
-          Program ID
-          <input className="text-input" value={getString(block.programId)} onChange={(event) => setBlockField(blockId, 'programId', event.target.value)} />
-        </label>
-        <label className="input-label">
-          Kind
-          <select className="select-input" value={getString(block.kind, 'custom')} onChange={(event) => setBlockField(blockId, 'kind', event.target.value)}>
-            <option value="custom">custom</option>
-            <option value="defi">defi</option>
-            <option value="governance">governance</option>
-          </select>
-        </label>
-        <label className="input-label">
-          Data (base64)
-          <textarea className="text-input code-input" value={getString(block.dataBase64)} onChange={(event) => setBlockField(blockId, 'dataBase64', event.target.value)} rows={3} />
-        </label>
-        <label className="input-label">
-          Accounts (comma-separated pubkeys)
-          <textarea className="text-input code-input" value={getString(block.accountsCsv)} onChange={(event) => setBlockField(blockId, 'accountsCsv', event.target.value)} rows={3} />
-        </label>
-      </div>
-    );
-  }, [setBlockField]);
+    if (type === 'custom-instruction') {
+      return (
+        <div className="form-grid two-col">
+          <label className="input-label">
+            Program ID
+            <input className="text-input" value={getString(configForm.programId)} onChange={(event) => setConfigField('programId', event.target.value)} />
+          </label>
+          <label className="input-label">
+            Kind
+            <select className="select-input" value={getString(configForm.kind, 'custom')} onChange={(event) => setConfigField('kind', event.target.value)}>
+              <option value="custom">custom</option>
+              <option value="defi">defi</option>
+              <option value="governance">governance</option>
+            </select>
+          </label>
+          <label className="input-label">
+            Data (base64)
+            <textarea className="text-input code-input" value={getString(configForm.dataBase64)} onChange={(event) => setConfigField('dataBase64', event.target.value)} rows={3} />
+          </label>
+          <label className="input-label">
+            Accounts (comma-separated pubkeys)
+            <textarea className="text-input code-input" value={getString(configForm.accountsCsv)} onChange={(event) => setConfigField('accountsCsv', event.target.value)} rows={3} />
+          </label>
+        </div>
+      );
+    }
+
+    return null;
+  }, [configForm, setConfigField]);
 
   const handleNodeResize = useCallback((blockId: string, width: number): void => {
     const nextWidth = clamp(width, minNodeWidth, maxNodeWidth);
@@ -1238,11 +1261,31 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
       ...current,
       [blockId]: nextWidth,
     }));
-    markDirty();
-  }, [markDirty]);
+    void runPersistedMutation(
+      async () => {
+        await updateFlowBlock(
+          flowId,
+          blockId,
+          {
+            uiWidth: nextWidth,
+          },
+          accessToken,
+        );
+      },
+      {
+        invalidateCompilation: false,
+      },
+    );
+  }, [accessToken, flowId, runPersistedMutation]);
 
   const handleNodesChange = useCallback((changes: NodeChange[]): void => {
-    let didMutateGraph = false;
+    const persistedLayoutUpdates = new Map<
+      string,
+      {
+        position?: { x: number; y: number };
+        uiWidth?: number;
+      }
+    >();
     let didResize = false;
     const widthUpdates: Record<string, number> = {};
     const hasMetaChanges = changes.some(
@@ -1252,12 +1295,8 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
     );
 
     changes.forEach((change) => {
-      if (change.type === 'select') {
-        if (change.selected) {
-          setSelectedBlockId(change.id);
-        } else {
-          setSelectedBlockId((current) => (current === change.id ? null : current));
-        }
+      if (change.type === 'select' && change.selected) {
+        setSelectedBlockId(change.id);
       }
     });
 
@@ -1266,21 +1305,32 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
 
       changes.forEach((change) => {
         if (change.type === 'position' && change.position) {
-          didMutateGraph = true;
+          const nextPosition = {
+            x: Math.max(0, change.position?.x ?? 0),
+            y: Math.max(0, change.position?.y ?? 0),
+          };
           next = next.map((node) =>
             node.id === change.id
               ? {
                 ...node,
-                x: Math.max(0, change.position?.x ?? node.x),
-                y: Math.max(0, change.position?.y ?? node.y),
+                x: nextPosition.x,
+                y: nextPosition.y,
               }
               : node,
           );
+
+          if (change.dragging === false) {
+            persistedLayoutUpdates.set(change.id, {
+              ...(persistedLayoutUpdates.get(change.id) ?? {}),
+              position: nextPosition,
+            });
+          }
         }
 
         if (change.type === 'dimensions' && change.dimensions?.width) {
           didResize = true;
-          widthUpdates[change.id] = clamp(change.dimensions.width, minNodeWidth, maxNodeWidth);
+          const nextWidth = clamp(change.dimensions.width, minNodeWidth, maxNodeWidth);
+          widthUpdates[change.id] = nextWidth;
         }
 
       });
@@ -1313,10 +1363,21 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
       }));
     }
 
-    if (didMutateGraph || didResize) {
-      markDirty();
+    if (persistedLayoutUpdates.size > 0) {
+      void runPersistedMutation(
+        async () => {
+          await Promise.all(
+            [...persistedLayoutUpdates.entries()].map(([blockId, payload]) =>
+              updateFlowBlock(flowId, blockId, payload, accessToken),
+            ),
+          );
+        },
+        {
+          invalidateCompilation: false,
+        },
+      );
     }
-  }, [markDirty]);
+  }, [accessToken, flowId, runPersistedMutation]);
 
   const handleEdgesChange = (changes: EdgeChange[]): void => {
     const removedIds = changes.filter((change) => change.type === 'remove').map((change) => change.id);
@@ -1325,8 +1386,13 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
       return;
     }
 
-    setGraphEdges((current) => current.filter((edge) => !removedIds.includes(edge.id)));
-    markDirty();
+    const removedEdges = graphEdges.filter((edge) => removedIds.includes(edge.id));
+    const nextEdges = graphEdges.filter((edge) => !removedIds.includes(edge.id));
+    setGraphEdges(nextEdges);
+    persistDependencies(
+      removedEdges.map((edge) => edge.target),
+      nextEdges,
+    );
   };
 
   const handleConnect = (connection: Connection): void => {
@@ -1337,14 +1403,13 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
       return;
     }
 
-    setGraphEdges((current) => {
-      if (current.some((edge) => edge.source === sourceId && edge.target === targetId)) {
-        return current;
-      }
+    if (graphEdges.some((edge) => edge.source === sourceId && edge.target === targetId)) {
+      return;
+    }
 
-      return [...current, { id: makeEdgeId(sourceId, targetId, current.length), source: sourceId, target: targetId }];
-    });
-    markDirty();
+    const nextEdges = [...graphEdges, { id: makeEdgeId(sourceId, targetId, graphEdges.length), source: sourceId, target: targetId }];
+    setGraphEdges(nextEdges);
+    persistDependencies([targetId], nextEdges);
   };
 
   const reactFlowNodes = useMemo<Array<Node<FlowBlockNodeData>>>(() => blocks.map((block, index) => {
@@ -1450,6 +1515,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
                 onEdgesChange={handleEdgesChange}
                 onConnect={handleConnect}
                 onNodeClick={(_event, node) => handleSelectBlock(node.id)}
+                onPaneClick={() => setSelectedBlockId(null)}
                 nodesDraggable
                 nodesConnectable
                 elementsSelectable
@@ -1489,15 +1555,15 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
                       Label
                       <input
                         className="text-input"
-                        value={getString(selectedBlock.label)}
-                        onChange={(event) => setBlockField(getBlockId(selectedBlock), 'label', event.target.value)}
+                        value={getString(configForm.label)}
+                        onChange={(event) => setConfigField('label', event.target.value)}
                       />
                     </label>
                     <label className="input-label">
                       Type
                       <select
                         className="select-input"
-                        value={getString(selectedBlock.type, 'transfer-sol')}
+                        value={getString(configForm.type, 'transfer-sol')}
                         onChange={(event) =>
                           changeBlockType(getBlockId(selectedBlock), event.target.value as SupportedBlockType)
                         }
@@ -1511,7 +1577,13 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
                     </label>
                   </div>
 
-                  {renderNodeFields(selectedBlock)}
+                  {renderConfigFields()}
+
+                  <div className="button-row" style={{ marginTop: '0.5rem' }}>
+                    <button type="button" className="primary-button" onClick={saveConfigToBlock}>
+                      Save Configuration
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <p className="hint-text">Click a block on the canvas to edit its configuration here.</p>
@@ -1732,13 +1804,12 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
               type="button"
               className="primary-button"
               onClick={() => void handlePublish()}
-              disabled={!compileResult || isPublishing || isDirty || isAutoSaving}
+              disabled={!compileResult || isPublishing || isAutoSaving}
             >
               {isPublishing ? 'Publishing...' : 'Publish'}
             </button>
           </div>
 
-          {isDirty ? <p className="hint-text">Waiting for auto-save before publish...</p> : null}
           {!compileResult ? <p className="error-text">Compile is required before publish.</p> : null}
 
           {lastPublishResult ? (

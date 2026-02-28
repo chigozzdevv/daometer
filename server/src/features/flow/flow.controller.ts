@@ -1,4 +1,10 @@
 import type { Request, Response } from 'express';
+import {
+  createFlowBlock,
+  deleteFlowBlock,
+  listFlowBlocks,
+  updateFlowBlock,
+} from '@/features/flow/flow-block.service';
 import { AppError } from '@/shared/errors/app-error';
 import { asyncHandler } from '@/shared/utils/async-handler.util';
 import {
@@ -100,5 +106,61 @@ export const publish = asyncHandler(async (req: Request, res: Response) => {
   res.status(201).json({
     success: true,
     data: result,
+  });
+});
+
+export const listBlocks = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.authUser) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const { flowId } = req.params as { flowId: string };
+  const blocks = await listFlowBlocks(flowId, req.authUser.userId);
+
+  res.status(200).json({
+    success: true,
+    data: blocks,
+  });
+});
+
+export const createBlock = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.authUser) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const { flowId } = req.params as { flowId: string };
+  const block = await createFlowBlock(flowId, req.body, req.authUser.userId);
+
+  res.status(201).json({
+    success: true,
+    data: block,
+  });
+});
+
+export const updateBlock = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.authUser) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const { flowId, blockId } = req.params as { flowId: string; blockId: string };
+  const block = await updateFlowBlock(flowId, blockId, req.body, req.authUser.userId);
+
+  res.status(200).json({
+    success: true,
+    data: block,
+  });
+});
+
+export const removeBlock = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.authUser) {
+    throw new AppError('Unauthorized', 401, 'UNAUTHORIZED');
+  }
+
+  const { flowId, blockId } = req.params as { flowId: string; blockId: string };
+  await deleteFlowBlock(flowId, blockId, req.authUser.userId);
+
+  res.status(200).json({
+    success: true,
+    data: null,
   });
 });

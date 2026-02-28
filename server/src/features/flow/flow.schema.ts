@@ -90,7 +90,7 @@ const customInstructionBlockSchema = blockBaseSchema.extend({
   kind: z.enum(['custom', 'defi', 'governance']).default('custom'),
 });
 
-const flowBlockSchema = z.discriminatedUnion('type', [
+export const flowBlockSchema = z.discriminatedUnion('type', [
   transferSolBlockSchema,
   transferSplBlockSchema,
   setGovernanceConfigBlockSchema,
@@ -123,9 +123,13 @@ const flowGraphEdgeSchema = z.object({
   target: z.string().trim().min(2).max(80),
 });
 
-const flowGraphSchema = z.object({
+export const flowGraphSchema = z.object({
   nodes: z.array(flowGraphNodeSchema).max(60),
   edges: z.array(flowGraphEdgeSchema).max(120),
+});
+
+const flowBlockDependencySchema = z.object({
+  sourceBlockId: z.string().trim().min(2).max(80),
 });
 
 const compileContextSchema = z.object({
@@ -263,6 +267,64 @@ export const publishFlowSchema = z.object({
   }),
   params: z.object({
     flowId: objectIdSchema,
+  }),
+  query: emptyObject,
+});
+
+export const listFlowBlocksSchema = z.object({
+  body: emptyObject,
+  params: z.object({
+    flowId: objectIdSchema,
+  }),
+  query: emptyObject,
+});
+
+export const createFlowBlockSchema = z.object({
+  body: z.object({
+    config: flowBlockSchema,
+    position: z
+      .object({
+        x: z.number().min(0),
+        y: z.number().min(0),
+      })
+      .optional(),
+    uiWidth: z.number().min(280).max(560).optional(),
+    dependencies: z.array(flowBlockDependencySchema).max(30).optional(),
+    orderIndex: z.number().int().min(0).optional(),
+  }),
+  params: z.object({
+    flowId: objectIdSchema,
+  }),
+  query: emptyObject,
+});
+
+export const updateFlowBlockSchema = z.object({
+  body: z
+    .object({
+      config: flowBlockSchema.optional(),
+      position: z
+        .object({
+          x: z.number().min(0),
+          y: z.number().min(0),
+        })
+        .optional(),
+      uiWidth: z.number().min(280).max(560).optional(),
+      dependencies: z.array(flowBlockDependencySchema).max(30).optional(),
+      orderIndex: z.number().int().min(0).optional(),
+    })
+    .refine((value) => Object.keys(value).length > 0, 'At least one field is required'),
+  params: z.object({
+    flowId: objectIdSchema,
+    blockId: z.string().trim().min(2).max(80),
+  }),
+  query: emptyObject,
+});
+
+export const deleteFlowBlockSchema = z.object({
+  body: emptyObject,
+  params: z.object({
+    flowId: objectIdSchema,
+    blockId: z.string().trim().min(2).max(80),
   }),
   query: emptyObject,
 });

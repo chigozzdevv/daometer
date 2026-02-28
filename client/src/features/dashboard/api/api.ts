@@ -425,6 +425,20 @@ export type FlowGraph = {
   edges: FlowGraphEdge[];
 };
 
+export type FlowBlockItem = {
+  blockId: string;
+  config: FlowBlockInput;
+  position: {
+    x: number;
+    y: number;
+  };
+  uiWidth: number;
+  dependencies: Array<{
+    sourceBlockId: string;
+  }>;
+  orderIndex: number;
+};
+
 export type FlowProposalDefaults = {
   titlePrefix: string;
   voteScope: 'community' | 'council';
@@ -730,6 +744,11 @@ export const getFlows = async (options: FlowListOptions = {}): Promise<FlowItem[
 
 export const getFlowById = async (flowId: string): Promise<FlowItem> => apiRequest<FlowItem>(`/flows/${flowId}`);
 
+export const getFlowBlocks = async (flowId: string, accessToken: string): Promise<FlowBlockItem[]> =>
+  apiRequest<FlowBlockItem[]>(`/flows/${flowId}/blocks`, {
+    accessToken,
+  });
+
 export const createFlow = async (input: CreateFlowInput, accessToken: string): Promise<FlowItem> =>
   apiRequest<FlowItem>('/flows', {
     method: 'POST',
@@ -741,6 +760,57 @@ export const updateFlow = async (flowId: string, input: UpdateFlowInput, accessT
   apiRequest<FlowItem>(`/flows/${flowId}`, {
     method: 'PATCH',
     body: input,
+    accessToken,
+  });
+
+export const createFlowBlock = async (
+  flowId: string,
+  input: {
+    config: FlowBlockInput;
+    position?: {
+      x: number;
+      y: number;
+    };
+    uiWidth?: number;
+    dependencies?: Array<{
+      sourceBlockId: string;
+    }>;
+    orderIndex?: number;
+  },
+  accessToken: string,
+): Promise<FlowBlockItem> =>
+  apiRequest<FlowBlockItem>(`/flows/${flowId}/blocks`, {
+    method: 'POST',
+    body: input,
+    accessToken,
+  });
+
+export const updateFlowBlock = async (
+  flowId: string,
+  blockId: string,
+  input: {
+    config?: FlowBlockInput;
+    position?: {
+      x: number;
+      y: number;
+    };
+    uiWidth?: number;
+    dependencies?: Array<{
+      sourceBlockId: string;
+    }>;
+    orderIndex?: number;
+  },
+  accessToken: string,
+): Promise<FlowBlockItem> =>
+  apiRequest<FlowBlockItem>(`/flows/${flowId}/blocks/${blockId}`, {
+    method: 'PATCH',
+    body: input,
+    accessToken,
+  });
+
+export const deleteFlowBlock = async (flowId: string, blockId: string, accessToken: string): Promise<void> =>
+  apiRequest<void>(`/flows/${flowId}/blocks/${blockId}`, {
+    method: 'DELETE',
     accessToken,
   });
 

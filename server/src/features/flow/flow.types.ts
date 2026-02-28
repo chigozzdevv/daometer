@@ -18,6 +18,10 @@ export interface FlowGraph {
   edges: FlowGraphEdge[];
 }
 
+export interface FlowBlockDependency {
+  sourceBlockId: string;
+}
+
 export interface FlowBlockBase {
   id: string;
   label: string;
@@ -103,6 +107,18 @@ export type FlowBlock =
   | CreateTokenAccountBlock
   | CreateStreamBlock
   | CustomInstructionBlock;
+
+export interface PersistedFlowBlock {
+  blockId: string;
+  config: FlowBlock;
+  position: {
+    x: number;
+    y: number;
+  };
+  uiWidth: number;
+  dependencies: FlowBlockDependency[];
+  orderIndex: number;
+}
 
 export interface FlowProposalDefaults {
   titlePrefix: string;

@@ -1,4 +1,8 @@
 import { Types } from 'mongoose';
+import {
+  getOrderedFlowBlocksForExecution,
+  replaceFlowBlocksFromSnapshot,
+} from '@/features/flow/flow-block.service';
 import { compileFlowBlocks } from '@/features/flow/flow.compiler';
 import { FlowModel, type FlowDocument } from '@/features/flow/flow.model';
 import type { FlowBlock, FlowCompileContext, FlowGraph, FlowProposalDefaults } from '@/features/flow/flow.types';
@@ -166,8 +170,7 @@ export const createFlow = async (input: CreateFlowInput, userId: Types.ObjectId)
   };
 
   const compilation = compileFlowBlocks(input.blocks);
-
-  return FlowModel.create({
+  const flow = await FlowModel.create({
     daoId: new Types.ObjectId(input.daoId),
     name: input.name,
     slug,
@@ -180,6 +183,16 @@ export const createFlow = async (input: CreateFlowInput, userId: Types.ObjectId)
     createdBy: userId,
     updatedBy: userId,
   });
+
+  await replaceFlowBlocksFromSnapshot(flow, input.blocks, input.graph ?? null, userId, {
+    bumpVersion: false,
+    resetCompilation: false,
+  });
+
+  flow.latestCompilation = buildCompilationSnapshot(compilation);
+  await flow.save();
+
+  return flow;
 };
 
 export const listFlows = async (options: {
@@ -250,6 +263,9 @@ export const getFlowById = async (flowId: string): Promise<FlowDocument> => {
 export const updateFlow = async (flowId: string, input: UpdateFlowInput, userId: Types.ObjectId): Promise<FlowDocument> => {
   const flow = await getFlowById(flowId);
   assertFlowOwner(flow, userId);
+  let shouldReplaceBlockSnapshot = false;
+  let replacementBlocks: FlowBlock[] | undefined;
+  let replacementGraph: FlowGraph | null | undefined;
 
   if (input.name) {
     const nextSlug = toSlug(input.name);
@@ -280,12 +296,22 @@ export const updateFlow = async (flowId: string, input: UpdateFlowInput, userId:
   }
 
   if (input.blocks) {
-    flow.blocks = input.blocks;
-    flow.latestCompilation = null;
+    replacementBlocks = input.blocks;
+    replacementGraph = input.graph ?? flow.graph ?? null;
+    shouldReplaceBlockSnapshot = true;
   }
 
   if (input.graph) {
-    flow.graph = input.graph;
+    replacementGraph = input.graph;
+
+    if (replacementBlocks === undefined && Array.isArray(flow.blocks)) {
+      replacementBlocks = flow.blocks as FlowBlock[];
+      shouldReplaceBlockSnapshot = true;
+    }
+
+    if (!shouldReplaceBlockSnapshot) {
+      flow.graph = input.graph;
+    }
   }
 
   if (input.proposalDefaults) {
@@ -299,6 +325,14 @@ export const updateFlow = async (flowId: string, input: UpdateFlowInput, userId:
   flow.updatedBy = userId;
 
   await flow.save();
+
+  if (shouldReplaceBlockSnapshot && replacementBlocks) {
+    await replaceFlowBlocksFromSnapshot(flow, replacementBlocks, replacementGraph ?? null, userId, {
+      bumpVersion: false,
+      resetCompilation: true,
+    });
+  }
+
   return flow;
 };
 
@@ -309,8 +343,13 @@ export const compileFlow = async (
 ): Promise<ReturnType<typeof compileFlowBlocks>> => {
   const flow = await getFlowById(flowId);
   assertFlowOwner(flow, userId);
+  const blocks = await getOrderedFlowBlocksForExecution(flowId, userId);
 
-  const compilation = compileFlowBlocks(flow.blocks as FlowBlock[], context);
+  if (blocks.length === 0) {
+    throw new AppError('Add at least one block to continue.', 400, 'FLOW_EMPTY');
+  }
+
+  const compilation = compileFlowBlocks(blocks, context);
 
   flow.latestCompilation = buildCompilationSnapshot(compilation);
   flow.updatedBy = userId;
@@ -354,8 +393,13 @@ export const publishFlow = async (
 }> => {
   const flow = await getFlowById(flowId);
   assertFlowOwner(flow, userId);
+  const blocks = await getOrderedFlowBlocksForExecution(flowId, userId);
 
-  const compilation = compileFlowBlocks(flow.blocks as FlowBlock[], input.context);
+  if (blocks.length === 0) {
+    throw new AppError('Add at least one block to continue.', 400, 'FLOW_EMPTY');
+  }
+
+  const compilation = compileFlowBlocks(blocks, input.context);
 
   const proposalDefaults = {
     ...defaultProposalDefaults,

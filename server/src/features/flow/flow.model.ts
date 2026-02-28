@@ -227,8 +227,8 @@ const flowSchema = new Schema<Flow>(
       type: Schema.Types.Mixed,
       required: true,
       validate: {
-        validator: (value: unknown) => Array.isArray(value) && value.length > 0,
-        message: 'Flow must have at least one block',
+        validator: (value: unknown) => Array.isArray(value),
+        message: 'Flow blocks must be an array',
       },
     },
     graph: {
