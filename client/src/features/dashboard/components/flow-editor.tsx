@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   compileInlineFlow,
   getDaoById,
@@ -66,14 +66,14 @@ type FlowBlockNodeData = {
   blockType: SupportedBlockType;
   orderIndex: number;
   onRemove: (blockId: string) => void;
-  onChangeType: (blockId: string, nextType: SupportedBlockType) => void;
-  onChangeField: (blockId: string, field: string, value: unknown) => void;
   onResizeWidth: (blockId: string, width: number) => void;
-  renderFields: (block: FlowBlockInput) => JSX.Element;
 };
 
-const FlowBlockNode = ({ id, data, selected }: NodeProps<FlowBlockNodeData>): JSX.Element => {
-  const blockId = getString(data.block.id, id);
+const FlowBlockNode = memo(({ id, data, selected }: NodeProps<FlowBlockNodeData>): JSX.Element => {
+  const blockId = getBlockId(data.block) || id;
+  const stopCanvasEvent = (event: { stopPropagation: () => void }): void => {
+    event.stopPropagation();
+  };
 
   return (
     <>
@@ -93,44 +93,27 @@ const FlowBlockNode = ({ id, data, selected }: NodeProps<FlowBlockNodeData>): JS
             <strong>{getString(data.block.label, 'Untitled block')}</strong>
           </div>
 
-          <div className="flow-node-actions nodrag">
-            <button type="button" className="secondary-button flow-node-mini nodrag" onClick={() => data.onRemove(blockId)}>
-              Remove
+          <div
+            className="flow-node-actions nodrag nopan nowheel"
+            onMouseDown={stopCanvasEvent}
+            onPointerDown={stopCanvasEvent}
+            onClick={stopCanvasEvent}
+          >
+            <button
+              type="button"
+              className="flow-node-remove nodrag"
+              onClick={() => data.onRemove(blockId)}
+              aria-label="Remove block"
+            >
+              X
             </button>
           </div>
         </div>
-
-        <div className="form-grid two-col nodrag">
-          <label className="input-label">
-            Label
-            <input
-              className="text-input"
-              value={getString(data.block.label)}
-              onChange={(event) => data.onChangeField(blockId, 'label', event.target.value)}
-            />
-          </label>
-          <label className="input-label">
-            Type
-            <select
-              className="select-input"
-              value={data.blockType}
-              onChange={(event) => data.onChangeType(blockId, event.target.value as SupportedBlockType)}
-            >
-              {supportedBlockTypes.map((typeItem) => (
-                <option key={typeItem.value} value={typeItem.value}>
-                  {typeItem.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        <div className="nodrag">{data.renderFields(data.block)}</div>
       </div>
       <Handle type="source" position={Position.Right} />
     </>
   );
-};
+});
 
 const flowNodeTypes: NodeTypes = {
   flowBlock: FlowBlockNode,
@@ -247,7 +230,7 @@ const defaultBlockForType = (type: SupportedBlockType): FlowBlockInput => {
 
 const deriveGraphFromBlocks = (blocks: FlowBlockInput[]): FlowGraph => {
   const nodes: FlowGraphNode[] = blocks.map((block, index) => {
-    const blockId = getString(block.id, makeBlockId());
+    const blockId = getBlockId(block) || `legacy-block-${index}`;
     const { x, y } = getDefaultNodePosition(index);
     return { id: blockId, x, y };
   });
@@ -260,7 +243,7 @@ const normalizeGraphForBlocks = (
   graphNodes: FlowGraphNode[],
   graphEdges: FlowGraphEdge[],
 ): FlowGraph => {
-  const blockIds = blocks.map((block) => getString(block.id)).filter(Boolean);
+  const blockIds = blocks.map((block) => getBlockId(block)).filter(Boolean);
   const blockIdSet = new Set(blockIds);
   const uniqueNodes = new Map<string, FlowGraphNode>();
 
@@ -313,8 +296,8 @@ const normalizeGraphForBlocks = (
 };
 
 const topologicalSortBlocks = (blocks: FlowBlockInput[], edges: FlowGraphEdge[]): FlowBlockInput[] => {
-  const blockIds = blocks.map((block) => getString(block.id));
-  const blockMap = new Map(blocks.map((block) => [getString(block.id), block]));
+  const blockIds = blocks.map((block) => getBlockId(block));
+  const blockMap = new Map(blocks.map((block) => [getBlockId(block), block]));
   const indexMap = new Map(blockIds.map((id, index) => [id, index]));
   const adjacency = new Map<string, Set<string>>();
   const inDegree = new Map<string, number>();
@@ -404,6 +387,30 @@ const getBoolean = (value: unknown, fallback = false): boolean =>
 
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max);
 
+const getBlockId = (block: FlowBlockInput): string => {
+  const explicitId = getString(block.id).trim();
+
+  if (explicitId.length > 0) {
+    return explicitId;
+  }
+
+  const legacyId = getString(block._id).trim();
+  return legacyId;
+};
+
+const ensureStableBlockId = (block: FlowBlockInput): FlowBlockInput => {
+  const resolvedId = getBlockId(block) || makeBlockId();
+
+  if (getString(block.id).trim() === resolvedId) {
+    return block;
+  }
+
+  return {
+    ...block,
+    id: resolvedId,
+  };
+};
+
 type FlowEditorProps = {
   accessToken: string;
   flowId: string;
@@ -437,6 +444,8 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
   const [graphNodes, setGraphNodes] = useState<FlowGraphNode[]>([]);
   const [graphEdges, setGraphEdges] = useState<FlowGraphEdge[]>([]);
   const [nodeWidths, setNodeWidths] = useState<Record<string, number>>({});
+  const [nodeMeta, setNodeMeta] = useState<Record<string, { dragging?: boolean; resizing?: boolean }>>({});
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
 
   const [compileContextJson, setCompileContextJson] = useState('{}');
   const [compileResult, setCompileResult] = useState<FlowCompilationResult | null>(null);
@@ -459,16 +468,25 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
   const orderingPreview = useMemo(() => {
     try {
       return {
-        ids: topologicalSortBlocks(blocks, graphEdges).map((block) => getString(block.id)),
+        ids: topologicalSortBlocks(blocks, graphEdges).map((block) => getBlockId(block)),
         error: null,
       };
     } catch (orderingError) {
       return {
-        ids: blocks.map((block) => getString(block.id)),
+        ids: blocks.map((block) => getBlockId(block)),
         error: orderingError instanceof Error ? orderingError.message : 'Invalid links',
       };
     }
   }, [blocks, graphEdges]);
+
+  const selectedBlock = useMemo(
+    () => blocks.find((block) => getBlockId(block) === selectedBlockId) ?? null,
+    [blocks, selectedBlockId],
+  );
+
+  const handleSelectBlock = useCallback((blockId: string): void => {
+    setSelectedBlockId(blockId);
+  }, []);
 
   const markDirty = (): void => {
     if (!isHydrating) {
@@ -485,7 +503,10 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
       const flow = await getFlowById(flowId);
       setIsHydrating(true);
 
-      const loadedBlocks = Array.isArray(flow.blocks) && flow.blocks.length > 0 ? flow.blocks : [createDefaultBlock()];
+      const loadedBlocks =
+        Array.isArray(flow.blocks) && flow.blocks.length > 0
+          ? flow.blocks.map((block) => ensureStableBlockId(block))
+          : [createDefaultBlock()];
       const fallbackGraph = deriveGraphFromBlocks(loadedBlocks);
       const normalizedGraph = normalizeGraphForBlocks(
         loadedBlocks,
@@ -502,11 +523,13 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
       setNodeWidths(
         Object.fromEntries(
           normalizedGraph.nodes.map((node) => {
-            const matchingBlock = loadedBlocks.find((block) => getString(block.id) === node.id);
+            const matchingBlock = loadedBlocks.find((block) => getBlockId(block) === node.id);
             return [node.id, clamp(getNumber(matchingBlock?.uiWidth, defaultNodeWidth), minNodeWidth, maxNodeWidth)];
           }),
         ),
       );
+      setNodeMeta({});
+      setSelectedBlockId(null);
       setActiveStep('builder');
       setIsDirty(false);
       setCompileResult(null);
@@ -609,58 +632,61 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
 
   const normalizeBlocksForApi = (items: FlowBlockInput[]): FlowBlockInput[] =>
     items.map((block) => {
-      const type = getString(block.type) as SupportedBlockType;
+      const normalizedBlock = ensureStableBlockId(block);
+      const type = getString(normalizedBlock.type) as SupportedBlockType;
 
       if (type === 'transfer-sol') {
         return {
-          ...block,
+          ...normalizedBlock,
           type,
-          label: getString(block.label, 'Treasury transfer'),
-          lamports: getNumber(block.lamports, 0),
+          label: getString(normalizedBlock.label, 'Treasury transfer'),
+          lamports: getNumber(normalizedBlock.lamports, 0),
         };
       }
 
       if (type === 'transfer-spl') {
         return {
-          ...block,
+          ...normalizedBlock,
           type,
-          label: getString(block.label, 'Token transfer'),
-          amount: getString(block.amount, '0'),
-          decimals: getNumber(block.decimals, 0),
+          label: getString(normalizedBlock.label, 'Token transfer'),
+          amount: getString(normalizedBlock.amount, '0'),
+          decimals: getNumber(normalizedBlock.decimals, 0),
         };
       }
 
       if (type === 'set-governance-config') {
         return {
-          ...block,
+          ...normalizedBlock,
           type,
-          yesVoteThresholdPercent: getNumber(block.yesVoteThresholdPercent, 0),
-          baseVotingTimeSeconds: getNumber(block.baseVotingTimeSeconds, 0),
-          minInstructionHoldUpTimeSeconds: getNumber(block.minInstructionHoldUpTimeSeconds, 0),
+          yesVoteThresholdPercent: getNumber(normalizedBlock.yesVoteThresholdPercent, 0),
+          baseVotingTimeSeconds: getNumber(normalizedBlock.baseVotingTimeSeconds, 0),
+          minInstructionHoldUpTimeSeconds: getNumber(normalizedBlock.minInstructionHoldUpTimeSeconds, 0),
           communityVetoThresholdPercent:
-            block.communityVetoThresholdPercent === undefined ? undefined : getNumber(block.communityVetoThresholdPercent, 0),
+            normalizedBlock.communityVetoThresholdPercent === undefined
+              ? undefined
+              : getNumber(normalizedBlock.communityVetoThresholdPercent, 0),
         };
       }
 
       if (type === 'create-token-account') {
         return {
-          ...block,
+          ...normalizedBlock,
           type,
-          label: getString(block.label, 'Create token account'),
+          label: getString(normalizedBlock.label, 'Create token account'),
         };
       }
 
       if (type === 'create-stream') {
         return {
-          ...block,
+          ...normalizedBlock,
           type,
-          totalAmount: getString(block.totalAmount, '0'),
-          canCancel: getBoolean(block.canCancel, true),
+          totalAmount: getString(normalizedBlock.totalAmount, '0'),
+          canCancel: getBoolean(normalizedBlock.canCancel, true),
         };
       }
 
       if (type === 'custom-instruction') {
-        const accountsCsv = getString(block.accountsCsv, '');
+        const accountsCsv = getString(normalizedBlock.accountsCsv, '');
         const accounts = accountsCsv
           .split(',')
           .map((entry) => entry.trim())
@@ -668,18 +694,18 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
           .map((pubkey) => ({ pubkey, isSigner: false, isWritable: false }));
 
         return {
-          id: getString(block.id, makeBlockId()),
+          id: getBlockId(normalizedBlock),
           type,
-          label: getString(block.label, 'Custom instruction'),
-          programId: getString(block.programId),
-          kind: getString(block.kind, 'custom'),
-          dataBase64: getString(block.dataBase64),
+          label: getString(normalizedBlock.label, 'Custom instruction'),
+          programId: getString(normalizedBlock.programId),
+          kind: getString(normalizedBlock.kind, 'custom'),
+          dataBase64: getString(normalizedBlock.dataBase64),
           accounts,
         };
       }
 
       return {
-        ...block,
+        ...normalizedBlock,
         type,
       };
     });
@@ -693,7 +719,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
     const baseBlocks = requireAcyclic ? topologicalSortBlocks(blocks, normalizedGraph.edges) : blocks;
     const normalizedBlocks = normalizeBlocksForApi(baseBlocks).map((block) => ({
       ...block,
-      uiWidth: getNodeWidth(getString(block.id)),
+      uiWidth: getNodeWidth(getBlockId(block)),
     }));
 
     return {
@@ -813,19 +839,19 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
         flowId,
         publishOnchainNow
           ? {
-              onchainCreate: {
-                enabled: true,
-                governanceProgramId: publishGovernanceProgramId.trim() || undefined,
-                programVersion: 3,
-                realmAddress: publishRealmAddress.trim() || undefined,
-                governanceAddress: publishGovernanceAddress.trim() || undefined,
-                governingTokenMint: publishGoverningTokenMint.trim() || undefined,
-                optionIndex: 0,
-                useDenyOption: true,
-                signOff: true,
-                requireSimulation: true,
-              },
-            }
+            onchainCreate: {
+              enabled: true,
+              governanceProgramId: publishGovernanceProgramId.trim() || undefined,
+              programVersion: 3,
+              realmAddress: publishRealmAddress.trim() || undefined,
+              governanceAddress: publishGovernanceAddress.trim() || undefined,
+              governingTokenMint: publishGoverningTokenMint.trim() || undefined,
+              optionIndex: 0,
+              useDenyOption: true,
+              signOff: true,
+              requireSimulation: true,
+            },
+          }
           : {},
         accessToken,
       );
@@ -953,7 +979,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
 
   const addBlock = (type: SupportedBlockType): void => {
     const nextBlock = applyDaoDefaultsToBlock(defaultBlockForType(type));
-    const nextBlockId = getString(nextBlock.id);
+    const nextBlockId = getBlockId(nextBlock);
 
     setBlocks((current) => [...current, nextBlock]);
     setGraphNodes((current) => {
@@ -964,12 +990,13 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
       ...current,
       [nextBlockId]: defaultNodeWidth,
     }));
+    setSelectedBlockId(nextBlockId);
 
     markDirty();
   };
 
   const removeBlock = (blockId: string): void => {
-    setBlocks((current) => current.filter((block) => getString(block.id) !== blockId));
+    setBlocks((current) => current.filter((block) => getBlockId(block) !== blockId));
     setGraphNodes((current) => current.filter((node) => node.id !== blockId));
     setGraphEdges((current) => current.filter((edge) => edge.source !== blockId && edge.target !== blockId));
     setNodeWidths((current) => {
@@ -977,6 +1004,12 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
       delete next[blockId];
       return next;
     });
+    setNodeMeta((current) => {
+      const next = { ...current };
+      delete next[blockId];
+      return next;
+    });
+    setSelectedBlockId((current) => (current === blockId ? null : current));
     markDirty();
   };
 
@@ -988,7 +1021,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
   const changeBlockType = (blockId: string, nextType: SupportedBlockType): void => {
     setBlocks((current) =>
       current.map((block) => {
-        if (getString(block.id) !== blockId) {
+        if (getBlockId(block) !== blockId) {
           return block;
         }
 
@@ -1005,10 +1038,10 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
     markDirty();
   };
 
-  const setBlockField = (blockId: string, field: string, value: unknown): void => {
+  const setBlockField = useCallback((blockId: string, field: string, value: unknown): void => {
     setBlocks((current) =>
       current.map((block) => {
-        if (getString(block.id) !== blockId) {
+        if (getBlockId(block) !== blockId) {
           return block;
         }
 
@@ -1020,10 +1053,10 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
     );
 
     markDirty();
-  };
+  }, [markDirty]);
 
-  const renderNodeFields = (block: FlowBlockInput): JSX.Element => {
-    const blockId = getString(block.id);
+  const renderNodeFields = useCallback((block: FlowBlockInput): JSX.Element => {
+    const blockId = getBlockId(block);
     const type = getString(block.type) as SupportedBlockType;
 
     if (type === 'transfer-sol') {
@@ -1196,9 +1229,9 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
         </label>
       </div>
     );
-  };
+  }, [setBlockField]);
 
-  const handleNodeResize = (blockId: string, width: number): void => {
+  const handleNodeResize = useCallback((blockId: string, width: number): void => {
     const nextWidth = clamp(width, minNodeWidth, maxNodeWidth);
 
     setNodeWidths((current) => ({
@@ -1206,12 +1239,27 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
       [blockId]: nextWidth,
     }));
     markDirty();
-  };
+  }, [markDirty]);
 
-  const handleNodesChange = (changes: NodeChange[]): void => {
+  const handleNodesChange = useCallback((changes: NodeChange[]): void => {
     let didMutateGraph = false;
     let didResize = false;
     const widthUpdates: Record<string, number> = {};
+    const hasMetaChanges = changes.some(
+      (change) =>
+        (change.type === 'position' && change.dragging !== undefined) ||
+        (change.type === 'dimensions' && change.resizing !== undefined),
+    );
+
+    changes.forEach((change) => {
+      if (change.type === 'select') {
+        if (change.selected) {
+          setSelectedBlockId(change.id);
+        } else {
+          setSelectedBlockId((current) => (current === change.id ? null : current));
+        }
+      }
+    });
 
     setGraphNodes((current) => {
       let next = current;
@@ -1222,10 +1270,10 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
           next = next.map((node) =>
             node.id === change.id
               ? {
-                  ...node,
-                  x: Math.max(0, change.position?.x ?? node.x),
-                  y: Math.max(0, change.position?.y ?? node.y),
-                }
+                ...node,
+                x: Math.max(0, change.position?.x ?? node.x),
+                y: Math.max(0, change.position?.y ?? node.y),
+              }
               : node,
           );
         }
@@ -1234,10 +1282,29 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
           didResize = true;
           widthUpdates[change.id] = clamp(change.dimensions.width, minNodeWidth, maxNodeWidth);
         }
+
       });
 
       return next;
     });
+
+    if (hasMetaChanges) {
+      setNodeMeta((current) => {
+        const next = { ...current };
+
+        changes.forEach((change) => {
+          if (change.type === 'position' && change.dragging !== undefined) {
+            next[change.id] = { ...next[change.id], dragging: change.dragging };
+          }
+
+          if (change.type === 'dimensions' && change.resizing !== undefined) {
+            next[change.id] = { ...next[change.id], resizing: change.resizing };
+          }
+        });
+
+        return next;
+      });
+    }
 
     if (didResize) {
       setNodeWidths((current) => ({
@@ -1249,7 +1316,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
     if (didMutateGraph || didResize) {
       markDirty();
     }
-  };
+  }, [markDirty]);
 
   const handleEdgesChange = (changes: EdgeChange[]): void => {
     const removedIds = changes.filter((change) => change.type === 'remove').map((change) => change.id);
@@ -1280,28 +1347,29 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
     markDirty();
   };
 
-  const reactFlowNodes: Array<Node<FlowBlockNodeData>> = blocks.map((block, index) => {
-    const blockId = getString(block.id, makeBlockId());
+  const reactFlowNodes = useMemo<Array<Node<FlowBlockNodeData>>>(() => blocks.map((block, index) => {
+    const blockId = getBlockId(block) || `legacy-block-${index}`;
     const graphNode = graphNodeMap.get(blockId) ?? getDefaultNodePosition(index);
     const blockType = getString(block.type, 'transfer-sol') as SupportedBlockType;
+    const meta = nodeMeta[blockId] || {};
 
     return {
       id: blockId,
       type: 'flowBlock',
       position: { x: graphNode.x, y: graphNode.y },
       style: { width: getNodeWidth(blockId) },
+      selected: selectedBlockId === blockId,
+      dragging: meta.dragging,
+      resizing: meta.resizing,
       data: {
         block,
         blockType,
         orderIndex: orderingPreview.ids.findIndex((id) => id === blockId) + 1,
         onRemove: removeBlock,
-        onChangeType: changeBlockType,
-        onChangeField: setBlockField,
         onResizeWidth: handleNodeResize,
-        renderFields: renderNodeFields,
       },
     };
-  });
+  }), [blocks, graphNodeMap, nodeMeta, nodeWidths, orderingPreview.ids, removeBlock, handleNodeResize, selectedBlockId]);
 
   const reactFlowEdges: Edge[] = graphEdges.map((edge) => ({
     id: edge.id,
@@ -1381,6 +1449,7 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
                 onNodesChange={handleNodesChange}
                 onEdgesChange={handleEdgesChange}
                 onConnect={handleConnect}
+                onNodeClick={(_event, node) => handleSelectBlock(node.id)}
                 nodesDraggable
                 nodesConnectable
                 elementsSelectable
@@ -1395,6 +1464,59 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
                 <Controls position="bottom-right" />
               </ReactFlow>
             </div>
+
+            <aside className="flow-config-panel">
+              <div className="flow-config-panel-head">
+                <div>
+                  <p className="hint-text">Block Config</p>
+                  <h3>{selectedBlock ? getString(selectedBlock.label, 'Untitled block') : 'No block selected'}</h3>
+                </div>
+                {selectedBlock ? (
+                  <button
+                    type="button"
+                    className="secondary-button flow-node-mini"
+                    onClick={() => removeBlock(getBlockId(selectedBlock))}
+                  >
+                    Remove
+                  </button>
+                ) : null}
+              </div>
+
+              {selectedBlock ? (
+                <div className="flow-config-panel-body">
+                  <div className="form-grid two-col">
+                    <label className="input-label">
+                      Label
+                      <input
+                        className="text-input"
+                        value={getString(selectedBlock.label)}
+                        onChange={(event) => setBlockField(getBlockId(selectedBlock), 'label', event.target.value)}
+                      />
+                    </label>
+                    <label className="input-label">
+                      Type
+                      <select
+                        className="select-input"
+                        value={getString(selectedBlock.type, 'transfer-sol')}
+                        onChange={(event) =>
+                          changeBlockType(getBlockId(selectedBlock), event.target.value as SupportedBlockType)
+                        }
+                      >
+                        {supportedBlockTypes.map((typeItem) => (
+                          <option key={typeItem.value} value={typeItem.value}>
+                            {typeItem.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  {renderNodeFields(selectedBlock)}
+                </div>
+              ) : (
+                <p className="hint-text">Click a block on the canvas to edit its configuration here.</p>
+              )}
+            </aside>
           </div>
 
           {graphEdges.length > 0 ? (
@@ -1426,220 +1548,220 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
       ) : null}
 
       {activeStep === 'compile' ? (
-      <article className="flow-step-card">
-        <header className="flow-step-head">
-          <span className="flow-step-index">Compile</span>
-          <div>
-            <h2>Compile Flow</h2>
-            <p>Compile validates block links and calculates risk.</p>
+        <article className="flow-step-card">
+          <header className="flow-step-head">
+            <span className="flow-step-index">Compile</span>
+            <div>
+              <h2>Compile Flow</h2>
+              <p>Compile validates block links and calculates risk.</p>
+            </div>
+          </header>
+
+          <label className="input-label">
+            Context JSON (optional)
+            <textarea
+              className="text-input code-input"
+              value={compileContextJson}
+              onChange={(event) => setCompileContextJson(event.target.value)}
+              rows={5}
+            />
+          </label>
+
+          <div className="button-row">
+            <button type="button" className="primary-button" onClick={() => void handleCompile()} disabled={isCompiling || isAutoSaving}>
+              {isCompiling ? 'Compiling...' : 'Compile'}
+            </button>
           </div>
-        </header>
 
-        <label className="input-label">
-          Context JSON (optional)
-          <textarea
-            className="text-input code-input"
-            value={compileContextJson}
-            onChange={(event) => setCompileContextJson(event.target.value)}
-            rows={5}
-          />
-        </label>
+          {compileResult ? (
+            <div className="result-shell">
+              <p>
+                Risk: <strong>{compileResult.riskScore}</strong> ({compileResult.riskLevel})
+              </p>
+              <p>Instructions: {compileResult.instructions.length}</p>
+              {compileResult.warnings.length > 0 ? (
+                <ul className="result-list">
+                  {compileResult.warnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p>No warnings.</p>
+              )}
+            </div>
+          ) : (
+            <p className="hint-text">Compile before publishing.</p>
+          )}
 
-        <div className="button-row">
-          <button type="button" className="primary-button" onClick={() => void handleCompile()} disabled={isCompiling || isAutoSaving}>
-            {isCompiling ? 'Compiling...' : 'Compile'}
-          </button>
-        </div>
-
-        {compileResult ? (
-          <div className="result-shell">
-            <p>
-              Risk: <strong>{compileResult.riskScore}</strong> ({compileResult.riskLevel})
-            </p>
-            <p>Instructions: {compileResult.instructions.length}</p>
-            {compileResult.warnings.length > 0 ? (
-              <ul className="result-list">
-                {compileResult.warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            ) : (
-              <p>No warnings.</p>
-            )}
+          <div className="button-row">
+            <button type="button" className="secondary-button" onClick={() => setActiveStep('builder')}>
+              Back: Builder
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => setActiveStep('publish')}
+              disabled={!compileResult}
+            >
+              Next: Publish
+            </button>
           </div>
-        ) : (
-          <p className="hint-text">Compile before publishing.</p>
-        )}
-
-        <div className="button-row">
-          <button type="button" className="secondary-button" onClick={() => setActiveStep('builder')}>
-            Back: Builder
-          </button>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => setActiveStep('publish')}
-            disabled={!compileResult}
-          >
-            Next: Publish
-          </button>
-        </div>
-      </article>
+        </article>
       ) : null}
 
       {activeStep === 'publish' ? (
-      <article className="flow-step-card">
-        <header className="flow-step-head">
-          <span className="flow-step-index">Publish</span>
-          <div>
-            <h2>Publish Proposal</h2>
-            <p>Create a proposal record and optionally create/sign-off on-chain in Realms.</p>
-          </div>
-        </header>
+        <article className="flow-step-card">
+          <header className="flow-step-head">
+            <span className="flow-step-index">Publish</span>
+            <div>
+              <h2>Publish Proposal</h2>
+              <p>Create a proposal record and optionally create/sign-off on-chain in Realms.</p>
+            </div>
+          </header>
 
-        <label className="checkbox-field">
-          <input
-            type="checkbox"
-            checked={publishOnchainNow}
-            onChange={(event) => setPublishOnchainNow(event.target.checked)}
-          />
-          Publish on-chain now
-        </label>
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={publishOnchainNow}
+              onChange={(event) => setPublishOnchainNow(event.target.checked)}
+            />
+            Publish on-chain now
+          </label>
 
-        {publishOnchainNow ? (
-          <div className="form-grid two-col">
-            <label className="input-label">
-              Realm address
-              <input
-                className="text-input"
-                value={publishRealmAddress}
-                onChange={(event) => setPublishRealmAddress(event.target.value)}
-              />
-            </label>
-            <label className="input-label">
-              Governance program ID
-              <input
-                className="text-input"
-                value={publishGovernanceProgramId}
-                onChange={(event) => setPublishGovernanceProgramId(event.target.value)}
-              />
-            </label>
-            <label className="input-label">
-              Governance account
-              <input
-                className="text-input"
-                value={publishGovernanceAddress}
-                onChange={(event) => setPublishGovernanceAddress(event.target.value)}
-                readOnly={!publishUseGovernanceOverride}
-                placeholder={
-                  isLoadingDaoContext
-                    ? 'Loading governance accounts...'
-                    : 'Set DAO default governance to auto-fill'
-                }
-              />
-              <label className="checkbox-field">
+          {publishOnchainNow ? (
+            <div className="form-grid two-col">
+              <label className="input-label">
+                Realm address
                 <input
-                  type="checkbox"
-                  checked={publishUseGovernanceOverride}
-                  onChange={(event) => {
-                    const nextChecked = event.target.checked;
-                    setPublishUseGovernanceOverride(nextChecked);
-
-                    if (!nextChecked) {
-                      const defaultAddress =
-                        daoContext?.defaultGovernanceAddress ??
-                        (governanceOptions.length === 1 ? governanceOptions[0].address : '');
-                      setPublishGovernanceAddress(defaultAddress);
-                    } else if (!publishGovernanceAddress && governanceOptions[0]?.address) {
-                      setPublishGovernanceAddress(governanceOptions[0].address);
-                    }
-                  }}
-                  disabled={governanceOptions.length === 0}
+                  className="text-input"
+                  value={publishRealmAddress}
+                  onChange={(event) => setPublishRealmAddress(event.target.value)}
                 />
-                Override governance account
               </label>
-              {publishUseGovernanceOverride ? (
-                <select
-                  className="select-input"
+              <label className="input-label">
+                Governance program ID
+                <input
+                  className="text-input"
+                  value={publishGovernanceProgramId}
+                  onChange={(event) => setPublishGovernanceProgramId(event.target.value)}
+                />
+              </label>
+              <label className="input-label">
+                Governance account
+                <input
+                  className="text-input"
                   value={publishGovernanceAddress}
                   onChange={(event) => setPublishGovernanceAddress(event.target.value)}
-                  disabled={isLoadingDaoContext || governanceOptions.length === 0}
-                >
-                  {governanceOptions.length === 0 ? (
-                    <option value="">
-                      {isLoadingDaoContext ? 'Loading governance accounts...' : 'No governance accounts found'}
-                    </option>
-                  ) : null}
-                  {governanceOptions.map((item) => (
-                    <option key={item.address} value={item.address}>
-                      {item.address}
-                    </option>
-                  ))}
-                </select>
-              ) : null}
-            </label>
-            <label className="input-label">
-              Governing token mint
-              <input
-                className="text-input"
-                value={publishGoverningTokenMint}
-                onChange={(event) => setPublishGoverningTokenMint(event.target.value)}
-              />
-            </label>
-          </div>
-        ) : null}
+                  readOnly={!publishUseGovernanceOverride}
+                  placeholder={
+                    isLoadingDaoContext
+                      ? 'Loading governance accounts...'
+                      : 'Set DAO default governance to auto-fill'
+                  }
+                />
+                <label className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={publishUseGovernanceOverride}
+                    onChange={(event) => {
+                      const nextChecked = event.target.checked;
+                      setPublishUseGovernanceOverride(nextChecked);
 
-        {publishOnchainNow && daoContext ? (
-          <div className="dao-card-actions">
-            <a
-              className="secondary-button"
-              href={`https://app.realms.today/dao/${daoContext.realmAddress}${daoContext.network === 'devnet' ? '?cluster=devnet' : ''}`}
-              target="_blank"
-              rel="noreferrer"
+                      if (!nextChecked) {
+                        const defaultAddress =
+                          daoContext?.defaultGovernanceAddress ??
+                          (governanceOptions.length === 1 ? governanceOptions[0].address : '');
+                        setPublishGovernanceAddress(defaultAddress);
+                      } else if (!publishGovernanceAddress && governanceOptions[0]?.address) {
+                        setPublishGovernanceAddress(governanceOptions[0].address);
+                      }
+                    }}
+                    disabled={governanceOptions.length === 0}
+                  />
+                  Override governance account
+                </label>
+                {publishUseGovernanceOverride ? (
+                  <select
+                    className="select-input"
+                    value={publishGovernanceAddress}
+                    onChange={(event) => setPublishGovernanceAddress(event.target.value)}
+                    disabled={isLoadingDaoContext || governanceOptions.length === 0}
+                  >
+                    {governanceOptions.length === 0 ? (
+                      <option value="">
+                        {isLoadingDaoContext ? 'Loading governance accounts...' : 'No governance accounts found'}
+                      </option>
+                    ) : null}
+                    {governanceOptions.map((item) => (
+                      <option key={item.address} value={item.address}>
+                        {item.address}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+              </label>
+              <label className="input-label">
+                Governing token mint
+                <input
+                  className="text-input"
+                  value={publishGoverningTokenMint}
+                  onChange={(event) => setPublishGoverningTokenMint(event.target.value)}
+                />
+              </label>
+            </div>
+          ) : null}
+
+          {publishOnchainNow && daoContext ? (
+            <div className="dao-card-actions">
+              <a
+                className="secondary-button"
+                href={`https://app.realms.today/dao/${daoContext.realmAddress}${daoContext.network === 'devnet' ? '?cluster=devnet' : ''}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open DAO in Realms
+              </a>
+            </div>
+          ) : null}
+
+          <div className="button-row">
+            <button type="button" className="secondary-button" onClick={() => setActiveStep('compile')}>
+              Back: Compile
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => void handlePublish()}
+              disabled={!compileResult || isPublishing || isDirty || isAutoSaving}
             >
-              Open DAO in Realms
-            </a>
+              {isPublishing ? 'Publishing...' : 'Publish'}
+            </button>
           </div>
-        ) : null}
 
-        <div className="button-row">
-          <button type="button" className="secondary-button" onClick={() => setActiveStep('compile')}>
-            Back: Compile
-          </button>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => void handlePublish()}
-            disabled={!compileResult || isPublishing || isDirty || isAutoSaving}
-          >
-            {isPublishing ? 'Publishing...' : 'Publish'}
-          </button>
-        </div>
+          {isDirty ? <p className="hint-text">Waiting for auto-save before publish...</p> : null}
+          {!compileResult ? <p className="error-text">Compile is required before publish.</p> : null}
 
-        {isDirty ? <p className="hint-text">Waiting for auto-save before publish...</p> : null}
-        {!compileResult ? <p className="error-text">Compile is required before publish.</p> : null}
-
-        {lastPublishResult ? (
-          <div className="result-shell">
-            <p>
-              Proposal ID: <strong>{lastPublishResult.proposalId}</strong>
-            </p>
-            <p>Flow status: {lastPublishResult.flow.status}</p>
-            <p>
-              Proposal monitor: <a href="/dashboard/proposals">Open Proposals page</a>
-            </p>
-            {lastPublishResult.onchainPreparation ? (
-              <>
-                <p>Prepared on-chain transactions: {lastPublishResult.onchainPreparation.preparedTransactions.length}</p>
-                <p>On-chain proposal: {lastPublishResult.onchainPreparation.proposalAddress}</p>
-              </>
-            ) : null}
-            <p>Updated at: {formatDateTime(lastPublishResult.flow.updatedAt)}</p>
-          </div>
-        ) : (
-          <p className="hint-text">No publish action yet.</p>
-        )}
-      </article>
+          {lastPublishResult ? (
+            <div className="result-shell">
+              <p>
+                Proposal ID: <strong>{lastPublishResult.proposalId}</strong>
+              </p>
+              <p>Flow status: {lastPublishResult.flow.status}</p>
+              <p>
+                Proposal monitor: <a href="/dashboard/proposals">Open Proposals page</a>
+              </p>
+              {lastPublishResult.onchainPreparation ? (
+                <>
+                  <p>Prepared on-chain transactions: {lastPublishResult.onchainPreparation.preparedTransactions.length}</p>
+                  <p>On-chain proposal: {lastPublishResult.onchainPreparation.proposalAddress}</p>
+                </>
+              ) : null}
+              <p>Updated at: {formatDateTime(lastPublishResult.flow.updatedAt)}</p>
+            </div>
+          ) : (
+            <p className="hint-text">No publish action yet.</p>
+          )}
+        </article>
       ) : null}
 
       {error ? <p className="error-text">{error}</p> : null}

@@ -1497,11 +1497,14 @@ p {
   min-height: 760px;
   max-height: 960px;
   overflow: hidden;
+  display: flex;
 }
 
 .flow-canvas-flow {
   width: 100%;
   height: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .flow-canvas-shell .react-flow__node-flowBlock {
@@ -1538,6 +1541,11 @@ p {
   box-shadow: var(--shadow);
 }
 
+.flow-canvas-shell .react-flow__node-flowBlock.selected .flow-block-node {
+  outline: 3px solid var(--yellow);
+  outline-offset: 0;
+}
+
 .flow-node-header {
   display: flex;
   align-items: flex-start;
@@ -1549,6 +1557,19 @@ p {
   display: flex;
   align-items: center;
   gap: 0.45rem;
+}
+
+.flow-node-title-button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
 }
 
 .flow-node-actions {
@@ -1563,12 +1584,71 @@ p {
   box-shadow: none;
 }
 
+.flow-node-remove {
+  border: 1px solid #c62828;
+  background: #fff1f1;
+  color: #c62828;
+  width: 1.9rem;
+  height: 1.9rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.flow-node-remove:hover {
+  background: #c62828;
+  color: var(--white);
+}
+
+.flow-node-summary {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.flow-node-type {
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
 .flow-block-node input,
 .flow-block-node textarea,
 .flow-block-node select,
 .flow-block-node button {
   user-select: text;
   cursor: auto;
+}
+
+.flow-config-panel {
+  width: min(380px, 36vw);
+  min-width: 320px;
+  border-left: var(--border);
+  background: var(--white);
+  padding: 0.85rem;
+  display: grid;
+  align-content: start;
+  gap: 0.75rem;
+  overflow-y: auto;
+}
+
+.flow-config-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.flow-config-panel-head h3 {
+  margin: 0.15rem 0 0;
+}
+
+.flow-config-panel-body {
+  display: grid;
+  gap: 0.85rem;
 }
 
 .flow-edge-list {
@@ -1772,14 +1852,22 @@ p {
   .flow-canvas-shell {
     height: 70vh;
     min-height: 560px;
+    flex-direction: column;
   }
 
   .flow-canvas-flow {
-    min-height: 100%;
+    min-height: 55%;
   }
 
   .flow-block-node {
     width: min(320px, calc(100vw - 4.2rem));
+  }
+
+  .flow-config-panel {
+    width: 100%;
+    min-width: 0;
+    border-left: 0;
+    border-top: var(--border);
   }
 
   .flow-open-action {
