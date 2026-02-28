@@ -1452,7 +1452,7 @@ p {
   gap: 0.65rem;
 }
 
-.form-grid > * {
+.form-grid>* {
   min-width: 0;
 }
 
@@ -1539,6 +1539,8 @@ p {
   display: grid;
   gap: 0.55rem;
   box-shadow: var(--shadow);
+  height: 100%;
+  box-sizing: border-box;
 }
 
 .flow-canvas-shell .react-flow__node-flowBlock.selected .flow-block-node {
@@ -1891,4 +1893,13 @@ p {
   .dao-governance-config-form {
     grid-template-columns: 1fr;
   }
+}
+
+.react-flow__resize-control.top,
+.react-flow__resize-control.bottom,
+.react-flow__resize-control.top-left,
+.react-flow__resize-control.top-right,
+.react-flow__resize-control.bottom-left,
+.react-flow__resize-control.bottom-right {
+  display: none !important;
 }

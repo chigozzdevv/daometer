@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import { Connection, Transaction, VersionedTransaction } from '@solana/web3.js';
 
 export type SolanaProviderConnectResult = {
@@ -20,24 +21,11 @@ export type SolanaProvider = {
 };
 
 const base64ToBytes = (value: string): Uint8Array => {
-  const binary = window.atob(value);
-  const bytes = new Uint8Array(binary.length);
-
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-
-  return bytes;
+  return new Uint8Array(Buffer.from(value, 'base64'));
 };
 
 const bytesToBase64 = (value: Uint8Array): string => {
-  let binary = '';
-
-  value.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-
-  return window.btoa(binary);
+  return Buffer.from(value).toString('base64');
 };
 
 export const getSolanaProvider = (): SolanaProvider | null => {
