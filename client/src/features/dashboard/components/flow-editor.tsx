@@ -46,6 +46,10 @@ const minNodeWidth = 280;
 const maxNodeWidth = 560;
 const PLACEHOLDER_PUBKEY = '11111111111111111111111111111111';
 const PLACEHOLDER_BASE64 = 'AQ==';
+const defaultRpcByNetwork: Record<'mainnet-beta' | 'devnet', string> = {
+  'mainnet-beta': 'https://api.mainnet-beta.solana.com',
+  devnet: 'https://api.devnet.solana.com',
+};
 
 type SupportedBlockType =
   | 'transfer-sol'
@@ -851,13 +855,17 @@ export const FlowEditor = ({ accessToken, flowId, onFlowPublished }: FlowEditorP
         }
 
         for (const prepared of result.onchainPreparation.preparedTransactions) {
+          const publishRpcUrl =
+            result.onchainPreparation.onchainExecution.rpcUrl ??
+            (daoContext ? defaultRpcByNetwork[daoContext.network] : defaultRpcByNetwork.devnet);
+
           const signature = await sendPreparedTransaction(
             provider,
             prepared.transactionMessage,
             prepared.transactionBase58,
             prepared.transactionBase64,
             {
-              rpcUrl: result.onchainPreparation.onchainExecution.rpcUrl,
+              rpcUrl: publishRpcUrl,
               recentBlockhash: prepared.recentBlockhash,
               lastValidBlockHeight: prepared.lastValidBlockHeight,
             },
